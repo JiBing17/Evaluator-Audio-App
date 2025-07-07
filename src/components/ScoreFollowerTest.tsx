@@ -3,19 +3,22 @@ import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Audio, AVPlaybackStatus } from 'expo-av';
 import { decode } from 'wav-decoder';
 import { ScoreFollower } from '../audio/ScoreFollower';
+import { CENSFeatures } from '../audio/FeaturesCENS';
+import { FeaturesConstructor } from '../audio/Features';
 
 interface ScoreFollowerTestProps {
   score: string; // Selected score name
   dispatch: (action: { type: string; payload?: any }) => void; // Dispatch function used to update global state
-  bpm?: number; // Optional BPM number
+  bpm?: number; // Optional BPM number,
+  FeaturesCls?: FeaturesConstructor<any>;
 }
 
 export default function ScoreFollowerTest({
   score,
   dispatch,
   bpm = 100, // Default BPM if not provided in props
+  FeaturesCls = CENSFeatures,
 }: ScoreFollowerTestProps) {
-
   const [processing, setProcessing] = useState(false); // Boolean for if score follower is running
   const [estimatedTime, setEstimatedTime] = useState(0); // Local state for storing estimated time
   const [estimatedBeat, setEstimatedBeat] = useState(0); // Local state for storing estimated beats
@@ -44,9 +47,13 @@ export default function ScoreFollowerTest({
       const refUri = `/${base}/${bpm}bpm/instrument_0.wav`; // Path to reference wav file of selected score 
       const liveUri = `/${base}/${bpm + 10}bpm/instrument_0.wav`; // Path to live/prerecorded wav file of selected score 
 
-      followerRef.current = await ScoreFollower.create(refUri); // Initialize score follower instance (default parameters from ScoreFollower.tsx)
+      followerRef.current = await ScoreFollower.create(refUri, FeaturesCls); // Initialize score follower instance (default parameters from ScoreFollower.tsx)
       const follower = followerRef.current!;
-      const { sampleRate, winLength } = follower; // Extract sample rate and window length from the ScoreFollower instance
+
+      // Extract sample rate and window length from the ScoreFollower instance
+      const sampleRate = follower.sr;
+      const winLength = follower.winLen 
+
       const frameSize = winLength; // Set framesize to window length property of scorefollower
       const resp = await fetch(liveUri); // Fetch the live WAV audio file from the specified URI
       if (!resp.ok) throw new Error(`Fetch failed: ${resp.status}`); // Throw an error if the response is not successful

@@ -15,7 +15,7 @@ import reducer_function from "./src/store/Dispatch";
 import ScoreDisplay from "./src/components/ScoreDisplay";
 import { SynthesizeButton } from "./src/components/SynthesizeButton";
 import Icon from 'react-native-vector-icons/Feather';
-import { ChromaMaker } from "./src/audio/features";
+import { CENSFeatures } from "./src/audio/FeaturesCENS";
 import FontAwesome from 'react-native-vector-icons/FontAwesome';
 import { ExpoMicProcessor } from './src/audio/ExpoMicProcessor';
 import TempoGraph from "./src/components/TempoGraph";
@@ -66,7 +66,7 @@ export default function App() {
  const processor = useRef(new ExpoMicProcessor()).current; // Create a stable ExpoMicProcessor instance that persists across renders
  const SAMPLE_RATE = 44100;  // Define sample rate for ChromaMaker
  const N_FFT = 4096; // Define chunk size for ChromaMaker
- const chromaMaker = useRef(new ChromaMaker(SAMPLE_RATE, N_FFT)).current; // Create a stable ChromaMaker instance that persists across renders
+ const chromaMaker = useRef(new CENSFeatures(SAMPLE_RATE, N_FFT)).current; // Create a stable ChromaMaker instance that persists across renders
 
   // Create an array of Animated.Value objects for a smooth height animation of each chroma bar.
   // const animatedChroma = useRef(new Array(12).fill(0).map(() => new Animated.Value(0))).current;
@@ -99,11 +99,11 @@ export default function App() {
 
       // Initialize the ChromaMaker for extracting chroma features
        const n_fft = 4096;
-       const chromaMaker = new ChromaMaker(audioCtx.sampleRate, n_fft); 
+       const chromaMaker = new CENSFeatures(audioCtx.sampleRate, n_fft); 
 
       // Handle incoming audio chunks from the worklet
        workletNode.port.onmessage = (event) => {
-         const audioChunk = event.data as Float32Array;
+         const audioChunk = event.data as number[];
          try {
             // Extract chroma features and update state
            const chromaResult = chromaMaker.insert(audioChunk);
@@ -123,7 +123,7 @@ export default function App() {
       await processor.init(); // ExpoMicProcessor intialization
 
       processor.onmessage = ({ data }) => { // Once we get buffer of size 4096
-        const vec = chromaMaker.insert(data);  // Insert with ChromaMaker to get chroma vector
+        const vec = chromaMaker.insert(Array.from(data));  // Insert with ChromaMaker to get chroma vector
         setChroma(vec); // Set chroma vector
       };
 
@@ -427,7 +427,6 @@ export default function App() {
             <ScoreFollowerTest
               score={state.score}
               dispatch={dispatch}
-              bpm={100}
             />
             </Animated.View>
             
