@@ -12,6 +12,7 @@
     "test": "jest --watchAll",
     "coverage": "jest --coverage",
     "generate-assets": "node scripts/generate_assets.js",
+    "generate-assets_v2": "node scripts/generate_assets_v2.js",
     "prebuild": "npm run generate-assets",
     "postinstall": "npm run generate-assets"
   },
