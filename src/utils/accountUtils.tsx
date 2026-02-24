@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { PerformanceData } from '../components/PerformanceStats';
 
 export interface UserAccount {
   id: string;
@@ -6,16 +7,6 @@ export interface UserAccount {
   password: string; // Non-encrypted password stored as plain text
   createdAt: string;
   performances: PerformanceData[];
-}
-
-export interface PerformanceData {
-  id: string;
-  scoreName: string;
-  timestamp: string;
-  intonationData: number[];
-  csvData: any[];
-  warpingPath: [number, number][];
-  tempo: number;
 }
 
 export const createAccount = async (username: string, password: string): Promise<UserAccount | null> => {

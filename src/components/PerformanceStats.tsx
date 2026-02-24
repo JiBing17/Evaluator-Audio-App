@@ -1,10 +1,23 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView } from 'react-native';
-import { getCurrentUser, PerformanceData } from '../utils/accountUtils';
+import { getCurrentUser } from '../utils/accountUtils';
+import { MISTAKE_THRESHOLD } from '../audio/Intonation';
+
+export interface PerformanceData {
+  id: string;
+  scoreName: string;
+  timestamp: string;
+  csvData: any[];
+  tempo: number;
+  intonationData: number[];
+  durationRatioData?: number[];
+  warpingPath?: [number, number][];
+}
 
 interface Stats {
   totalPerformances: number;
   averageIntonation: number;
+  averageDurationRatio: number,
   flatPercentage: number;
   sharpPercentage: number;
   neutralPercentage: number;
@@ -27,6 +40,7 @@ export default function PerformanceStats() {
     const totalPerformances = performances.length;
     
     let totalIntonation = 0;
+    let totalDurationRatio = 0;
     let flatCount = 0;
     let sharpCount = 0;
     let neutralCount = 0;
@@ -37,13 +51,18 @@ export default function PerformanceStats() {
         totalIntonation += Math.abs(intonation);
         totalNotes++;
         
-        if (intonation < -0.5) flatCount++;
-        else if (intonation > 0.5) sharpCount++;
+        if (intonation < -MISTAKE_THRESHOLD) flatCount++;
+        else if (intonation > MISTAKE_THRESHOLD) sharpCount++;
         else neutralCount++;
       });
+
+      if (perf.durationRatioData) {
+        for (let d of perf.durationRatioData) totalDurationRatio += d;
+      }
     });
 
     const averageIntonation = totalNotes > 0 ? totalIntonation / totalNotes : 0;
+    const averageDurationRatio = totalDurationRatio > 0? totalDurationRatio / totalNotes : 0;
     const flatPercentage = totalNotes > 0 ? (flatCount / totalNotes) * 100 : 0;
     const sharpPercentage = totalNotes > 0 ? (sharpCount / totalNotes) * 100 : 0;
     const neutralPercentage = totalNotes > 0 ? (neutralCount / totalNotes) * 100 : 0;
@@ -56,6 +75,7 @@ export default function PerformanceStats() {
     setStats({
       totalPerformances,
       averageIntonation,
+      averageDurationRatio,
       flatPercentage,
       sharpPercentage,
       neutralPercentage,
