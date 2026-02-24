@@ -60,6 +60,7 @@ export default function ScoreFollowerTest({
   const [sampleRate, setSampleRate] = useState<number>(0); // State to store sample rate of score follower
   const [performanceComplete, setPerformanceComplete] = useState(false); // State to determine if plackback of a score is finished or not
   const [performanceSaved, setPerformanceSaved] = useState(false); // State to track if performance has been saved
+  const [isPaused, setIsPaused] = useState(false);
   const isWeb = Platform.OS === "web"; // Boolean indicating if user is on website version or not
   const dispatchSequenceRef = useRef<number>(0);
 
@@ -94,8 +95,14 @@ export default function ScoreFollowerTest({
 
   // Web versin of wav file upload
   function onWebChange(e: React.ChangeEvent<HTMLInputElement>) {
+    console.log("Web file input changed", e);
     const file = parseWebWavFile(e);
     setLiveFile(file);
+
+    // Allow re-selecting the same file by clearing the input value
+    if (inputRef.current) {
+      inputRef.current.value = "";
+    }
   }
   // Mobile version of wav file upload using DocumentPicker
   async function onMobilePress() {
@@ -137,11 +144,83 @@ export default function ScoreFollowerTest({
     alert('Performance saved successfully!');
   };
 
+  const resetCursorToStart = () => {
+    dispatch({ type: "SET_ESTIMATED_BEAT", payload: 0 });
+  };
+
+  const handlePlaybackStatusUpdate = (status: AVPlaybackStatus) => {
+    if (!status.isLoaded) return;
+
+    const currentTimeSec = status.positionMillis / 1000;
+
+    if (status.isPlaying) {
+      while (
+        nextIndexRef.current < csvDataRef.current.length &&
+        currentTimeSec >= csvDataRef.current[nextIndexRef.current].predictedTime
+      ) {
+        const beat = csvDataRef.current[nextIndexRef.current].beat;
+        const predictedTime = csvDataRef.current[nextIndexRef.current].predictedTime;
+        console.log(`Audio time: ${currentTimeSec.toFixed(3)}s, Note time: ${predictedTime.toFixed(3)}s, Beat: ${beat}`);
+        nextIndexRef.current++;
+
+        // Unified cursor control via state dispatch
+        // Pass audioTime for lag analysis logging
+        dispatch({ type: "SET_ESTIMATED_BEAT", payload: beat, audioTime: currentTimeSec } as any);
+      }
+    }
+
+    if (status.didJustFinish) {
+      dispatch({ type: "start/stop" }); // Toggle "playing" boolean (to false in this case)
+      dispatch({ type: "SET_NOTE_COLORS", payload: [] });
+      setPerformanceComplete(true); // Toggle performanceComplete boolean to true
+      setIsPaused(false);
+      nextIndexRef.current = 0; // Reset index ref so we can play again
+      soundRef.current?.setOnPlaybackStatusUpdate(null); // Stop listening for playback updates
+
+      console.log('[Performance End] Cursor reset triggered');
+
+      // Reset cursor by setting beat to 0 after a short delay to ensure all other state updates complete
+      setTimeout(() => {
+        resetCursorToStart();
+      }, 100);
+    }
+  };
+
+  const createSoundAndPlay = async () => {
+    if (!liveFile) return;
+
+    const soundSource = { uri: liveFile.uri };
+    const { sound } = await Audio.Sound.createAsync(
+      soundSource,
+      {
+        shouldPlay: true,
+        progressUpdateIntervalMillis: 10,
+      },
+      handlePlaybackStatusUpdate,
+    );
+    soundRef.current = sound;
+  };
+
   const runFollower = async () => {
     if (!score) return; // Do nothing if no score is selected
 
     const base = score.replace(/\.musicxml$/, ""); // Retrieve score name (".musicxml" removal)
     setPerformanceSaved(false); // Reset saved state when starting new performance
+    setIsPaused(false);
+
+    if (soundRef.current) {
+      try {
+        soundRef.current.setOnPlaybackStatusUpdate(null);
+        await soundRef.current.stopAsync();
+        await soundRef.current.unloadAsync();
+      } catch {
+        // Ignore cleanup errors
+      }
+      soundRef.current = null;
+    }
+    nextIndexRef.current = 0;
+    resetCursorToStart();
+    dispatch({ type: "SET_NOTE_COLORS", payload: [] });
 
     // These booleans are mainly used to disable certain features at certain times
     dispatch({ type: "start/stop" }); // Toggle playing boolean (to true in this case)
@@ -314,55 +393,60 @@ export default function ScoreFollowerTest({
       console.log(pathRef.current); // Show full path
       setWarpingPath(pathRef.current); // Save warping path in local "warpingPath" state
 
-      const onPlaybackStatusUpdate = (status: AVPlaybackStatus) => {
-        if (!status.isLoaded) return;
-        const currentTimeSec = status.positionMillis / 1000;
-      while (
-        nextIndexRef.current < csvDataRef.current.length &&
-        currentTimeSec >= csvDataRef.current[nextIndexRef.current].predictedTime
-      ) {
-        const beat = csvDataRef.current[nextIndexRef.current].beat;
-        const predictedTime = csvDataRef.current[nextIndexRef.current].predictedTime;
-        console.log(`Audio time: ${currentTimeSec.toFixed(3)}s, Note time: ${predictedTime.toFixed(3)}s, Beat: ${beat}`);
-        nextIndexRef.current++;
-
-        // Unified cursor control via state dispatch
-        // Pass audioTime for lag analysis logging
-        dispatch({ type: "SET_ESTIMATED_BEAT", payload: beat, audioTime: currentTimeSec } as any);  
-      }
-        if (status.didJustFinish) {
-          dispatch({ type: "start/stop" }); // Toggle "playing" boolean (to false in this case)
-          dispatch({ type: "SET_NOTE_COLORS", payload: [] }); 
-          setPerformanceComplete(true); // Toggle performanceComplete booelan to true
-          nextIndexRef.current = 0; // Reset index ref so we can play again and update estimated beat properly in the while loop above
-          soundRef.current?.setOnPlaybackStatusUpdate(null); // Stop listening for playback updates
-
-          console.log('[Performance End] Cursor reset triggered');
-          
-          // Reset cursor by setting beat to 0 after a short delay to ensure all other state updates complete
-          setTimeout(() => {
-            dispatch({ type: "SET_ESTIMATED_BEAT", payload: 0 });
-          }, 100);
-        }
-      };
-
-      const soundSource = { uri: liveFile.uri };
       dispatch({ type: "toggle_loading_performance" }); // Toggle loading boolean (to false in this case)
 
       // Create and load the sound object from the live audio URI
-      const { sound } = await Audio.Sound.createAsync(
-        soundSource, // Pass in the live wav file's uri as argument
-        {
-          shouldPlay: true, // Automatically start playback once loaded
-          progressUpdateIntervalMillis: 10, // Set how often status updates are triggered
-        },
-        onPlaybackStatusUpdate, // Callback to handle playback progress (frame processing, alignment, etc.)
-      );
-      soundRef.current = sound;
+      await createSoundAndPlay();
     } catch (err) {
       console.error("ScoreFollower Error:", err);
       dispatch({ type: "start/stop" });
     }
+  };
+
+  const togglePause = async (doPause = null) => {
+    console.log("[Toggle Pause] isPaused =", isPaused, doPause);
+    if (!soundRef.current) return;
+
+    try {
+      const status = await soundRef.current.getStatusAsync();
+      if (!status.isLoaded) return;
+
+      if (status.isPlaying || doPause === true) {
+        await soundRef.current.pauseAsync();
+        setIsPaused(true);
+      } else {
+        await soundRef.current.playAsync();
+        setIsPaused(false);
+      }
+    } catch (err) {
+      console.error("Pause/Resume Error:", err);
+    }
+  };
+
+  const restartPlayback = async () => {
+    await togglePause(true); // Ensure playback is paused before restarting
+
+    if (!liveFile) return;
+
+    if (state.playing) {
+      dispatch({ type: "start/stop" }); // flip playing off so runFollower can toggle it on again
+    }
+
+    try {
+      if (soundRef.current) {
+        const status = await soundRef.current.getStatusAsync();
+        if (status.isLoaded) {
+          await soundRef.current.stopAsync();
+        }
+        await soundRef.current.unloadAsync();
+      }
+    } catch (err) {
+      console.error("Restart Error:", err);
+    } finally {
+      soundRef.current = null;
+    }
+
+    await runFollower();
   };
 
   return (
@@ -396,7 +480,12 @@ export default function ScoreFollowerTest({
                   styles.fileButton,
                   state.playing && styles.disabledButton,
                 ]}
-                onPress={() => inputRef.current?.click()}
+                onPress={() => {
+                  if (inputRef.current) {
+                    inputRef.current.value = "";
+                    inputRef.current.click();
+                  }
+                }}
                 disabled={state.playing}
               >
                 {/* Display wav file name on button */}
@@ -462,6 +551,39 @@ export default function ScoreFollowerTest({
         </Text>
       </TouchableOpacity>
 
+        {/* Pause/Resume + Restart buttons */}
+        <View style={styles.buttonRow}>
+          <TouchableOpacity
+            style={[
+              styles.button,
+              styles.halfButton,
+              styles.pauseButton,
+              (!state.playing && !isPaused) && styles.disabledButton,
+            ]}
+            onPress={togglePause}
+            disabled={!state.playing && !isPaused}
+          >
+            <Text style={styles.buttonText}>
+              {isPaused ? "Resume" : "Pause"}
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.button,
+              styles.halfButton,
+              styles.lastHalfButton,
+              styles.restartButton,
+              (!liveFile || (!state.playing && !performanceComplete && !isPaused)) &&
+                styles.disabledButton,
+            ]}
+            onPress={restartPlayback}
+            disabled={!liveFile || (!state.playing && !performanceComplete && !isPaused)}
+          >
+            <Text style={styles.buttonText}>Restart</Text>
+          </TouchableOpacity>
+        </View>
+
       {/* Save Performance button */}
       <TouchableOpacity
         style={[
@@ -487,6 +609,25 @@ const styles = StyleSheet.create({
     backgroundColor: "#2C3E50",
     borderRadius: 8,
     alignItems: "center",
+  },
+  buttonRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: 8,
+  },
+  halfButton: {
+    flex: 1,
+    marginRight: 8,
+  },
+  lastHalfButton: {
+    marginRight: 0,
+  },
+  pauseButton: {
+    backgroundColor: "#8E44AD",
+  },
+  restartButton: {
+    backgroundColor: "#34495E",
   },
   saveButton: {
     marginTop: 8,

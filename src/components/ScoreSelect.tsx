@@ -62,11 +62,6 @@ export function Score_Select({
           disabled={state.isplaying} // Can't select score when performance is playing
           key={state.scores.length}
           onValueChange={(value) => {
-            // Extra protection if disable is not working
-            if (state.playing) {
-              return; // Ignore while playing
-            }
-
             // midiModule contains the MIDI file for the selected score (obtained using scoreToMidi hashmap - key=musicxml_name , value=require(path_to_midi_file))
             const midiModule = scoreToMidi[value];
 
