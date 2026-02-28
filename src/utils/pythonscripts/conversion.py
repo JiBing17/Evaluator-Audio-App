@@ -1,6 +1,6 @@
 import argparse
-import platform
 import shutil
+import platform
 import subprocess
 from pathlib import Path
 
@@ -44,18 +44,9 @@ def resolve_musescore_executable(user_provided: str | None) -> str:
 		if found:
 			return found
 
-	hint = (
-		"Pass --musescore with the full path "
-		"(e.g. C:\\Program Files\\MuseScore 4\\bin\\MuseScore4.exe)."
-	)
-	if system == "Darwin":
-		hint = (
-			"Pass --musescore with the full path "
-			"(e.g. /Applications/MuseScore 4.app/Contents/MacOS/mscore)."
-		)
-
 	raise FileNotFoundError(
-		f"Could not find MuseScore executable. {hint}"
+		"Could not find MuseScore executable. Pass --musescore "
+		"with the full path (e.g. C:\\Program Files\\MuseScore 4\\bin\\MuseScore4.exe)."
 	)
 
 
@@ -78,11 +69,60 @@ def build_outputs(midi_file: Path, out_dir: Path, basename: str | None) -> tuple
 	return musicxml_path, wav_path, csv_path
 
 
+def find_midi_files(input_path: Path) -> list[Path]:
+	if input_path.is_file():
+		if input_path.suffix.lower() not in {".mid", ".midi"}:
+			raise ValueError(f"Input file is not a MIDI: {input_path}")
+		return [input_path]
+
+	if input_path.is_dir():
+		midi_files = [
+			p for p in input_path.iterdir()
+			if p.is_file() and p.suffix.lower() in {".mid", ".midi"}
+		]
+		if not midi_files:
+			raise FileNotFoundError(f"No MIDI files found in directory: {input_path}")
+		return sorted(midi_files, key=lambda p: p.name.lower())
+
+	raise FileNotFoundError(f"Input path not found: {input_path}")
+
+
+def build_target_dir(base_out_dir: Path, midi_file: Path) -> Path:
+	target_dir = base_out_dir / midi_file.stem
+	target_dir.mkdir(parents=True, exist_ok=True)
+	return target_dir
+
+
+def move_midi_to_target(midi_file: Path, target_dir: Path) -> Path:
+	destination = target_dir / midi_file.name
+
+	if midi_file.resolve() == destination.resolve():
+		return destination
+
+	if destination.exists():
+		destination.unlink()
+
+	shutil.move(str(midi_file), str(destination))
+	return destination
+
+
+def process_one_midi(musescore_exe: str, midi_file: Path, base_out_dir: Path, basename: str | None) -> tuple[Path, Path, Path, Path]:
+	target_dir = build_target_dir(base_out_dir, midi_file)
+	moved_midi = move_midi_to_target(midi_file, target_dir)
+	musicxml_path, wav_path, csv_path = build_outputs(moved_midi, target_dir, basename)
+
+	run_musescore_export(musescore_exe, moved_midi, musicxml_path)
+	run_musescore_export(musescore_exe, moved_midi, wav_path)
+	create_alignment_csv(str(csv_path), str(musicxml_path))
+
+	return moved_midi, musicxml_path, wav_path, csv_path
+
+
 def main() -> None:
 	parser = argparse.ArgumentParser(
 		description="Convert MIDI to MusicXML + WAV using MuseScore, then create alignment CSV."
 	)
-	parser.add_argument("midi_file", help="Path to input MIDI file (.mid/.midi)")
+	parser.add_argument("input_path", help="Path to input MIDI file, or a directory containing MIDI files")
 	parser.add_argument(
 		"--out-dir",
 		default=".",
@@ -101,25 +141,27 @@ def main() -> None:
 
 	args = parser.parse_args()
 
-	midi_file = Path(args.midi_file).expanduser().resolve()
-	if not midi_file.exists():
-		raise FileNotFoundError(f"MIDI file not found: {midi_file}")
+	input_path = Path(args.input_path).expanduser().resolve()
 
 	out_dir = Path(args.out_dir).expanduser().resolve()
 	out_dir.mkdir(parents=True, exist_ok=True)
 
 	musescore_exe = resolve_musescore_executable(args.musescore)
-	musicxml_path, wav_path, csv_path = build_outputs(midi_file, out_dir, args.basename)
+	midi_files = find_midi_files(input_path)
 
-	run_musescore_export(musescore_exe, midi_file, musicxml_path)
-	run_musescore_export(musescore_exe, midi_file, wav_path)
-
-	create_alignment_csv(str(csv_path), str(musicxml_path))
-
-	print("Done.")
-	print(f"MusicXML: {musicxml_path}")
-	print(f"WAV:      {wav_path}")
-	print(f"CSV:      {csv_path}")
+	print(f"Processing {len(midi_files)} MIDI file(s)...")
+	for midi_file in midi_files:
+		moved_midi, musicxml_path, wav_path, csv_path = process_one_midi(
+			musescore_exe,
+			midi_file,
+			out_dir,
+			args.basename,
+		)
+		print("Done.")
+		print(f"MIDI:     {moved_midi}")
+		print(f"MusicXML: {musicxml_path}")
+		print(f"WAV:      {wav_path}")
+		print(f"CSV:      {csv_path}")
 
 
 if __name__ == "__main__":
