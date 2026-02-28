@@ -1,10 +1,5 @@
 import { extractTempo } from "./fileSelectorUtils";
-import {
-  OpenSheetMusicDisplay,
-  Cursor,
-  Fraction,
-  GraphicalNote,
-} from "opensheetmusicdisplay";
+import { OpenSheetMusicDisplay, Cursor, Fraction } from "opensheetmusicdisplay";
 import { Platform } from "react-native";
 import scoresData from "../score_name_to_data_map/scoreToMusicxmlMap";
 
@@ -195,7 +190,7 @@ export function getAllGraphicalNotes(osmd: any): any[] {
 
 export function applyNoteColors(
   osmd: any,
-  noteColors: Array<{ index: number; color: string }>,
+  noteColors: { index: number; color: string }[],
 ) {
   if (!osmd) return;
 
@@ -243,7 +238,7 @@ export function applyNoteColors(
           try {
             vf.setAttribute("fill", color);
             vf.setAttribute("stroke", color);
-          } catch (e) {}
+          } catch {}
         } else if (vf.attrs && typeof vf.attrs === "object") {
           // Some VexFlow renderers expose attrs
           vf.attrs.fill = color;
@@ -305,11 +300,6 @@ export function buildOsmdHtmlForNative(mxmlString: string) {
       <div id="osmd-container"></div>
       <script>
         console.log("[WebView] Initializing OpenSheetMusicDisplay...");
-
-        // ===== State holders for cursor movement =====
-        window.__movedBeats = 0;
-        window.__overshootBeats = 0;
-        window.__stepLoopId = null;
 
         (async () => {
           // ===== Initialize and load OSMD =====
@@ -412,69 +402,79 @@ export function buildOsmdHtmlForNative(mxmlString: string) {
             }
           };
 
-          // ===== Cursor Movement Function (LOCKED ANIMATION) =====
+          // ===== Cursor Movement Function =====
            window.stepCursor = function(targetBeats) {
-            console.log("[WebView] stepCursor called, target:", targetBeats);
+            // console.log("[WebView] stepCursor called, target:", targetBeats);
 
-            // Match web: Always cancel and restart
-            if (window.__stepLoopId !== null) {
-              cancelAnimationFrame(window.__stepLoopId);
-              window.__stepLoopId = null;
-            }
-
-            if (!osm.IsReadyToRender()) {
+            if (!osm || !osm.cursor || !osm.IsReadyToRender()) {
               console.warn("[WebView] OSMD not ready");
               return;
             }
 
-            const measures = osm.GraphicSheet.MeasureList;
-            if (!measures.length || !measures[0].length) return;
+            const iterator = osm.cursor.Iterator;
 
-            const denom = measures[0][0].parentSourceMeasure.ActiveTimeSignature.Denominator;
-
-            // Match web: Simple check without separate flag
-            let initialBeats = window.__movedBeats;
-            if (window.__movedBeats === 0) {
-              const init = osm.cursor.VoicesUnderCursor(osm.Sheet.Instruments[0]);
-              if (init.length && init[0].Notes.length) {
-                const len = init[0].Notes[0].Length;
-                const num = len.Numerator === 0 ? 1 : len.Numerator;
-                initialBeats = (num / len.Denominator) * denom;
-              }
+            // 1. Identify Context (Beat Unit)
+            // Yse the first measure's denominator as the global "beat unit" (e.g. 4 for quarter notes).
+            // This ensures 'targetBeats' (which comes from the audio engine) maps consistently to visual time.
+            let baseDenom = 4;
+            const measureList = osm.GraphicSheet.MeasureList;
+            if (measureList && measureList.length > 0 && measureList[0].length > 0) {
+                const firstMeasure = measureList[0][0].parentSourceMeasure;
+                if (firstMeasure && firstMeasure.ActiveTimeSignature) {
+                    baseDenom = firstMeasure.ActiveTimeSignature.Denominator;
+                }
             }
-            window.__movedBeats = initialBeats;
-
-            const toMove = Math.max(0, targetBeats);
-            let moved = window.__movedBeats + window.__overshootBeats;
-            window.__overshootBeats = 0;
-
-            function stepFn() {
-              if (moved >= toMove) {
-                const leftover = moved - toMove;
-                window.__overshootBeats = leftover;
-                window.__movedBeats = toMove;
-                osm.render();
-                return;
-              }
-
-              osm.cursor.next();
-              const cur = osm.cursor.VoicesUnderCursor(osm.Sheet.Instruments[0]);
-              let delta = 0;
-              
-              if (cur.length && cur[0].Notes.length) {
-                const len = cur[0].Notes[0].Length;
-                const num = len.Numerator === 0 ? 1 : len.Numerator;
-                delta = (num / len.Denominator) * denom;
-              }
-
-              moved += delta;
-              window.__movedBeats = moved;
-
-              osm.render();
-              window.__stepLoopId = requestAnimationFrame(stepFn);
+            
+            function getCurrentBeats() {
+              // currentTimeStamp.RealValue is the fraction of a Whole Note (e.g. 0.25 for quarter).
+              // Multiply by baseDenom to get "beats".
+              return iterator.currentTimeStamp.RealValue * baseDenom;
             }
 
-            stepFn();
+            let currentBeats = getCurrentBeats();
+            const EPSILON = 0.001; // Reduced tolerance for tighter sync
+
+            // 2. Handle Backward Jump
+            // If target is significantly behind current, reset to start.
+            if (targetBeats < currentBeats - EPSILON) {
+                osm.cursor.reset();
+                currentBeats = getCurrentBeats();
+            }
+
+            // 3. Move Forward Synchronously
+            // Advance only if the next position is still <= target.
+            const MAX_ITERATIONS = 1000;
+            let iterations = 0;
+            
+            while (iterations < MAX_ITERATIONS) {
+               if (osm.cursor.EndOfSheet) break;
+
+               // Snapshot current timestamp
+               const preMoveTimestamp = iterator.currentTimeStamp.RealValue;
+               
+               // Attempt move
+               osm.cursor.next();
+               
+               // Check new position
+               const postMoveTimestamp = iterator.currentTimeStamp.RealValue;
+               const postMoveBeats = postMoveTimestamp * baseDenom;
+               
+               // If didn't actually move (e.g. end of sheet), break
+               if (postMoveTimestamp === preMoveTimestamp) break;
+
+               // If new position is effectively beyond target, step back and stop.
+               if (postMoveBeats > targetBeats + EPSILON) {
+                   osm.cursor.previous();
+                   break;
+               }
+               
+               // Confirm move and continue
+               currentBeats = postMoveBeats;
+               iterations++;
+            }
+            
+            // 4. Render updated cursor
+            osm.render();
           };
 
           // ===== Extract Tempo from XML =====
@@ -553,20 +553,20 @@ export function buildOsmdHtmlForNative(mxmlString: string) {
         }
 
         // ===== Register Message Listeners =====
-        // iOS uses window.addEventListener
-        window.addEventListener("message", handleRNMessage);
-        
-        // Android uses document.addEventListener
-        document.addEventListener("message", handleRNMessage);
+        if (navigator.userAgent.match(/Android/i)) {
+            document.addEventListener("message", handleRNMessage);
+        } else {
+            // IOS
+            window.addEventListener("message", handleRNMessage);
+        }
 
         // Log that listeners are ready
-        console.log("[WebView] Message listeners registered");
+        console.log("[WebView] Message listeners registered for " + (navigator.userAgent.match(/Android/i) ? "Android" : "iOS/Web"));
       </script>
     </body>
     </html>
   `;
 }
-
 
 /**
  * Handles messages sent from the OSMD WebView back to React Native.
@@ -603,7 +603,7 @@ export const onHandleOsmdMessageForNative = (raw: string, dispatch: any) => {
         // console.log(`[WebView] Applied ${data.count} note color updates`);
         // Optional dispatch: dispatch({ type: "color_notes_applied", count: data.count });
         break;
-      
+
       // ---- Cursor movement confirmation ----
       case "cursorMovedAck":
         // console.log(`[WebView] Cursor moved to beat ${data.targetBeats}`);
@@ -618,4 +618,3 @@ export const onHandleOsmdMessageForNative = (raw: string, dispatch: any) => {
     console.error("Failed to parse WebView message", e, raw);
   }
 };
-

@@ -28,7 +28,7 @@ export const parseCsv = (text: string): CSVRow[] => {
   return dataLines.map((line) => {
     const cols = line.split(",");
 
-    const beat = parseFloat(cols[0]) + 1; // convert 0-based to 1-based beat index
+    const beat = parseFloat(cols[0]); // RETAIN 0-based beat index for compatibility with OSMD iterator
     const midi = parseFloat(cols[4]); // midi pitch
     const refTime = parseFloat(cols[5]); // reference timestamp in seconds
     const liveTime = parseFloat(cols[6]); // live performance timestamp in seconds
