@@ -1,4 +1,5 @@
 import argparse
+import platform
 import shutil
 import subprocess
 from pathlib import Path
@@ -16,12 +17,25 @@ def resolve_musescore_executable(user_provided: str | None) -> str:
 			return found
 		raise FileNotFoundError(f"MuseScore executable not found: {user_provided}")
 
-	common_windows_paths = [
-		Path(r"C:\Program Files\MuseScore 4\bin\MuseScore4.exe"),
-		Path(r"C:\Program Files\MuseScore 3\bin\MuseScore3.exe"),
-	]
+	system = platform.system()
+	common_paths: list[Path] = []
 
-	for candidate in common_windows_paths:
+	if system == "Windows":
+		common_paths = [
+			Path(r"C:\Program Files\MuseScore 4\bin\MuseScore4.exe"),
+			Path(r"C:\Program Files\MuseScore 3\bin\MuseScore3.exe"),
+		]
+	elif system == "Darwin":
+		common_paths = [
+			Path("/Applications/MuseScore 4.app/Contents/MacOS/mscore"),
+			Path("/Applications/MuseScore 4.app/Contents/MacOS/MuseScore4"),
+			Path("/Applications/MuseScore 3.app/Contents/MacOS/mscore"),
+			Path("/Applications/MuseScore 3.app/Contents/MacOS/MuseScore3"),
+			Path("~/Applications/MuseScore 4.app/Contents/MacOS/mscore").expanduser(),
+			Path("~/Applications/MuseScore 3.app/Contents/MacOS/mscore").expanduser(),
+		]
+
+	for candidate in common_paths:
 		if candidate.exists():
 			return str(candidate)
 
@@ -30,9 +44,18 @@ def resolve_musescore_executable(user_provided: str | None) -> str:
 		if found:
 			return found
 
+	hint = (
+		"Pass --musescore with the full path "
+		"(e.g. C:\\Program Files\\MuseScore 4\\bin\\MuseScore4.exe)."
+	)
+	if system == "Darwin":
+		hint = (
+			"Pass --musescore with the full path "
+			"(e.g. /Applications/MuseScore 4.app/Contents/MacOS/mscore)."
+		)
+
 	raise FileNotFoundError(
-		"Could not find MuseScore executable. Pass --musescore "
-		"with the full path (e.g. C:\\Program Files\\MuseScore 4\\bin\\MuseScore4.exe)."
+		f"Could not find MuseScore executable. {hint}"
 	)
 
 
