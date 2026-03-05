@@ -5,6 +5,7 @@ import {
   TouchableOpacity,
   StyleSheet,
   TextInput,
+  Switch,
 } from "react-native";
 
 import {
@@ -66,9 +67,16 @@ export default function PerformanceScreen({
 
   const [isProcessing, setIsProcessing] = useState(false);
   const [testInput, setTestInput] = useState<number>(0);
+  const [useDTWMode, setUseDTWMode] = useState(true); // true = DTW, false = Note-by-Note
+  const useDTWModeRef = useRef(true); // Ref to access current mode in event handler
   const updateScheduled = useRef<boolean>(false);
   const latestBeat = useRef<number>(0);
   const lastDispatchedBeat = useRef<number | null>(null);
+
+  // Keep ref in sync with state
+  useEffect(() => {
+    useDTWModeRef.current = useDTWMode;
+  }, [useDTWMode]);
 
   const scheduleBeatUpdate = (beat: number) => {
     latestBeat.current = beat;
@@ -104,8 +112,8 @@ export default function PerformanceScreen({
    * Handle audio frame events from native module.
    * Event contains: { refPosition: number, pitch: number, probability: number }
    *
-   * refPosition is the DTW-aligned position in the reference sequence (0-indexed frame number).
-   * We convert it to time using: estTime = refPosition * FRAME_SIZE / SAMPLE_RATE
+   * In DTW mode: refPosition is the DTW-aligned position in the reference sequence.
+   * In Note-by-Note mode: we ignore refPosition and use pitch to advance.
    */
   const handleAudioFrame = (event: {
     refPosition: number;
@@ -114,18 +122,24 @@ export default function PerformanceScreen({
   }) => {
     const { refPosition, pitch } = event;
 
-    // refPosition is -1 if DTW is not initialized
-    if (refPosition < 0) {
-      return;
+    if (useDTWModeRef.current) {
+      // DTW Mode: Use time-based tracking from DTW alignment
+      // refPosition is -1 if DTW is not initialized
+      if (refPosition < 0) {
+        return;
+      }
+
+      // Convert reference position to time in seconds
+      // Each frame is FRAME_SIZE samples at SAMPLE_RATE Hz
+      // refPosition 0 = time 0, refPosition 1 = time 0.093s, etc.
+      const estTime = (refPosition * FRAME_SIZE) / SAMPLE_RATE;
+
+      // Use DTW-aligned time tracking
+      handleTimePitchUpdate(estTime, pitch);
+    } else {
+      // Note-by-Note Mode: Use pitch-based advancement
+      handlePitchUpdate(pitch);
     }
-
-    // Convert reference position to time in seconds
-    // Each frame is FRAME_SIZE samples at SAMPLE_RATE Hz
-    // refPosition 0 = time 0, refPosition 1 = time 0.093s, etc.
-    const estTime = (refPosition * FRAME_SIZE) / SAMPLE_RATE;
-
-    // Use DTW-aligned time tracking
-    handleTimePitchUpdate(estTime, pitch);
   };
 
   /**
@@ -179,15 +193,20 @@ export default function PerformanceScreen({
     csvDataRef.current = noteTable;
 
     console.log("Isplaying=", state.playing, "\nDispatch start/stop");
+    console.log("Mode:", useDTWMode ? "DTW" : "Note-by-Note");
     dispatch({ type: "SET_NOTE_COLORS", payload: [] });
     dispatch({ type: "start/stop" });
 
-    // Initialize native DTW with reference audio
-    const dtwInitialized = await initializeDTW(base);
-    if (!dtwInitialized) {
-      console.warn(
-        "DTW initialization failed - score following may not work correctly",
-      );
+    // Initialize native DTW with reference audio (only in DTW mode)
+    if (useDTWMode) {
+      const dtwInitialized = await initializeDTW(base);
+      if (!dtwInitialized) {
+        console.warn(
+          "DTW initialization failed - score following may not work correctly",
+        );
+      }
+    } else {
+      console.log("Note-by-Note mode - skipping DTW initialization");
     }
 
     // Start Native Audio Engine
@@ -308,6 +327,24 @@ export default function PerformanceScreen({
         <Text style={styles.tempoText}>Reference Tempo: {bpm} BPM</Text>
       ) : null}
 
+      {/* Mode Toggle */}
+      <View style={styles.modeToggleContainer}>
+        <Text style={styles.modeLabel}>Note-by-Note</Text>
+        <Switch
+          value={useDTWMode}
+          onValueChange={setUseDTWMode}
+          disabled={state.playing} // Can't change mode while playing
+          trackColor={{ false: "#767577", true: "#81b0ff" }}
+          thumbColor={useDTWMode ? "#2C3E50" : "#f4f3f4"}
+        />
+        <Text style={styles.modeLabel}>DTW</Text>
+      </View>
+      <Text style={styles.modeDescription}>
+        {useDTWMode
+          ? "DTW: Follows along with your playing tempo"
+          : "Note-by-Note: Advances when correct pitch is detected"}
+      </Text>
+
       {/* Start Performance button */}
       <TouchableOpacity
         style={[
@@ -393,6 +430,25 @@ const styles = StyleSheet.create({
     textShadowRadius: 4,
     textAlign: "left",
     marginBottom: 8,
+  },
+  modeToggleContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    marginVertical: 8,
+    gap: 8,
+  },
+  modeLabel: {
+    fontSize: 14,
+    color: "#2C3E50",
+    fontWeight: "500",
+  },
+  modeDescription: {
+    fontSize: 12,
+    color: "#666",
+    textAlign: "center",
+    marginBottom: 12,
+    fontStyle: "italic",
   },
   hiddenInput: {
     display: "none",
