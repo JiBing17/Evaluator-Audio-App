@@ -23,6 +23,8 @@ class AudioPerformanceModule(reactContext: ReactApplicationContext) : ReactConte
     
     private val SAMPLE_RATE = 44100
     private val PROCESSING_BUFFER_SIZE = 4096
+    private val RMS_GATE = 0.01
+    private val YIN_PROB_GATE = 0.4
 
     private val MIN_BUFFER_SIZE = AudioRecord.getMinBufferSize(
         SAMPLE_RATE,
@@ -40,20 +42,8 @@ class AudioPerformanceModule(reactContext: ReactApplicationContext) : ReactConte
     // CENS feature extractor
     private var censUtils: CENSUtils? = null
     
-    // DTW state
-    private var refFeaturegram: Array<DoubleArray> = emptyArray()
-    private var refLen: Int = 0
-    private var liveFeaturegram: MutableList<DoubleArray> = mutableListOf()
-    private var accumulatedCost: Array<DoubleArray> = emptyArray()
-    private var winSize: Int = 50
-    private var maxRunCount: Int = 3
-    private var diagWeight: Double = 0.75
-    private var refIdx: Int = 0
-    private var liveIdx: Int = -1
-    private var prevStep: String = "---"
-    private var runCount: Int = 1
-    private var lastRefIdx: Int = 0
-    private var dtwInitialized: Boolean = false
+    // DTW logic extracted
+    private val dtw = DynamicTimeWarping()
 
     override fun getName() = "AudioPerformanceModule"
 
@@ -112,37 +102,17 @@ class AudioPerformanceModule(reactContext: ReactApplicationContext) : ReactConte
                 Log.d(TAG, "Computing $numFrames CENS frames from audio")
                 
                 // Compute CENS features for each frame
-                refFeaturegram = Array(numFrames) { frameIdx ->
+                val features = Array(numFrames) { frameIdx ->
                     val frameStart = frameIdx * PROCESSING_BUFFER_SIZE
                     val frame = FloatArray(PROCESSING_BUFFER_SIZE) { i ->
                         if (frameStart + i < audioSamples.size) audioSamples[frameStart + i] else 0f
                     }
                     cens.computeCENS(frame)
                 }
-                refLen = numFrames
                 
-                Log.d(TAG, "Computed $refLen reference CENS features")
+                Log.d(TAG, "Computed ${features.size} reference CENS features")
                 
-                // Initialize accumulated cost matrix with Infinity
-                val matrixWidth = refLen * 4
-                accumulatedCost = Array(refLen) { DoubleArray(matrixWidth) { Double.POSITIVE_INFINITY } }
-                
-                // Set parameters
-                winSize = bigC
-                maxRunCount = maxRun
-                diagWeight = diagW
-                
-                // Reset state
-                refIdx = 0
-                liveIdx = -1
-                prevStep = "---"
-                runCount = 1
-                lastRefIdx = 0
-                liveFeaturegram.clear()
-                
-                dtwInitialized = true
-                
-                Log.d(TAG, "DTW initialized with refLen=$refLen, winSize=$winSize, maxRunCount=$maxRunCount")
+                dtw.initialize(features, bigC, maxRun, diagW)
                 
                 // Resolve on main thread
                 mainHandler.post {
@@ -279,37 +249,18 @@ class AudioPerformanceModule(reactContext: ReactApplicationContext) : ReactConte
             Log.d(TAG, "Computing $numFrames CENS frames from audio")
             
             // Compute CENS features for each frame
-            refFeaturegram = Array(numFrames) { frameIdx ->
+            val features = Array(numFrames) { frameIdx ->
                 val frameStart = frameIdx * PROCESSING_BUFFER_SIZE
                 val frame = FloatArray(PROCESSING_BUFFER_SIZE) { i ->
                     audioSamples.getDouble(frameStart + i).toFloat()
                 }
                 cens.computeCENS(frame)
             }
-            refLen = numFrames
             
-            Log.d(TAG, "Computed $refLen reference CENS features")
+            Log.d(TAG, "Computed ${features.size} reference CENS features")
             
-            // Initialize accumulated cost matrix with Infinity
-            val matrixWidth = refLen * 4
-            accumulatedCost = Array(refLen) { DoubleArray(matrixWidth) { Double.POSITIVE_INFINITY } }
+            dtw.initialize(features, bigC, maxRun, diagW)
             
-            // Set parameters
-            winSize = bigC
-            maxRunCount = maxRun
-            diagWeight = diagW
-            
-            // Reset state
-            refIdx = 0
-            liveIdx = -1
-            prevStep = "---"
-            runCount = 1
-            lastRefIdx = 0
-            liveFeaturegram.clear()
-            
-            dtwInitialized = true
-            
-            Log.d(TAG, "DTW initialized with refLen=$refLen, winSize=$winSize, maxRunCount=$maxRunCount")
             promise.resolve(true)
         } catch (e: Exception) {
             Log.e(TAG, "Error initializing DTW from audio: ${e.message}")
@@ -330,35 +281,17 @@ class AudioPerformanceModule(reactContext: ReactApplicationContext) : ReactConte
     fun initializeDTW(refFeatures: ReadableArray, bigC: Int, maxRun: Int, diagW: Double, promise: Promise) {
         try {
             // Parse reference featuregram
-            refLen = refFeatures.size()
-            refFeaturegram = Array(refLen) { i ->
+            val refLen = refFeatures.size()
+            val features = Array(refLen) { i ->
                 val chromaArr = refFeatures.getArray(i)!!
                 DoubleArray(chromaArr.size()) { j -> chromaArr.getDouble(j) }
             }
             
-            // Initialize accumulated cost matrix with Infinity
-            val matrixWidth = refLen * 4
-            accumulatedCost = Array(refLen) { DoubleArray(matrixWidth) { Double.POSITIVE_INFINITY } }
-            
-            // Set parameters
-            winSize = bigC
-            maxRunCount = maxRun
-            diagWeight = diagW
-            
-            // Reset state
-            refIdx = 0
-            liveIdx = -1
-            prevStep = "---"
-            runCount = 1
-            lastRefIdx = 0
-            liveFeaturegram.clear()
+            dtw.initialize(features, bigC, maxRun, diagW)
             
             // Initialize CENS utils
             censUtils = CENSUtils(SAMPLE_RATE, PROCESSING_BUFFER_SIZE)
             
-            dtwInitialized = true
-            
-            Log.d(TAG, "DTW initialized with refLen=$refLen, winSize=$winSize, maxRunCount=$maxRunCount")
             promise.resolve(true)
         } catch (e: Exception) {
             Log.e(TAG, "Error initializing DTW: ${e.message}")
@@ -391,8 +324,8 @@ class AudioPerformanceModule(reactContext: ReactApplicationContext) : ReactConte
             isRecording.set(true)
             
             // Reset DTW state for new performance
-            if (dtwInitialized) {
-                resetDTWState()
+            if (dtw.isInitialized) {
+                dtw.resetState()
             }
 
             // Start background thread to process audio
@@ -424,14 +357,14 @@ class AudioPerformanceModule(reactContext: ReactApplicationContext) : ReactConte
     private var lastEventTime: Long = 0
     
     // Silence detection threshold (RMS energy) - higher value requires louder sound
-    private val SILENCE_THRESHOLD = 1500f  // Increased to filter soft background noise
+    private val SILENCE_THRESHOLD = 1500f  // Filter soft background noise
 
     private fun processAudioStream() {
         val buffer = ShortArray(PROCESSING_BUFFER_SIZE)
         val floatBuffer = FloatArray(PROCESSING_BUFFER_SIZE)
         val fastYin = FastYin(SAMPLE_RATE.toFloat(), PROCESSING_BUFFER_SIZE)
 
-        Log.d(TAG, "Processing thread started, DTW initialized: $dtwInitialized")
+        Log.d(TAG, "Processing thread started, DTW initialized: ${dtw.isInitialized}")
 
         while (isRecording.get()) {
             val readResult = audioRecord?.read(buffer, 0, PROCESSING_BUFFER_SIZE) ?: 0
@@ -452,17 +385,18 @@ class AudioPerformanceModule(reactContext: ReactApplicationContext) : ReactConte
 
                 // DTW step (if initialized) - only if audio is not silence
                 var refPosition = -1
-                if (dtwInitialized && censUtils != null) {
+                if (dtw.isInitialized && censUtils != null) {
                     // Skip DTW if audio is too quiet (silence)
                     if (rmsEnergy >= SILENCE_THRESHOLD) {
                         try {
-                            refPosition = dtwStep(floatBuffer)
+                            val chromaVec = censUtils!!.computeCENS(floatBuffer)
+                            refPosition = dtw.step(chromaVec)
                         } catch (e: Exception) {
                             Log.e(TAG, "DTW step error: ${e.message}")
                         }
                     } else {
                         // Return last known position during silence
-                        refPosition = lastRefIdx
+                        refPosition = dtw.getLastRefIdx()
                     }
                 }
 
@@ -470,6 +404,11 @@ class AudioPerformanceModule(reactContext: ReactApplicationContext) : ReactConte
                 val currentTime = System.currentTimeMillis()
                 if (currentTime - lastEventTime > 50) {
                     sendFrameEvent(refPosition, pitch.toDouble(), probability.toDouble())
+                    
+                    if (pitch > 0 && probability > YIN_PROB_GATE) {
+                        sendEvent("onPitchDetected", pitch.toDouble())
+                    }
+                    
                     lastEventTime = currentTime
                 }
             } else {
@@ -479,175 +418,12 @@ class AudioPerformanceModule(reactContext: ReactApplicationContext) : ReactConte
         Log.d(TAG, "Processing thread stopped")
     }
 
-    /**
-     * Perform one DTW step with the given audio frame.
-     * @return Current position in reference sequence, or -1 on error
-     */
-    private fun dtwStep(audioFrame: FloatArray): Int {
-        // Safety check
-        val cens = censUtils ?: return -1
-        if (refFeaturegram.isEmpty() || refLen == 0) return -1
-        
-        // Compute CENS features from audio frame
-        val chromaVec = cens.computeCENS(audioFrame)
-        liveFeaturegram.add(chromaVec)
-        liveIdx += 1
-        
-        // Check if liveIdx exceeds matrix width
-        if (liveIdx >= accumulatedCost[0].size) {
-            Log.w(TAG, "Live index $liveIdx exceeds matrix width, returning last position")
-            return lastRefIdx
+    private fun sendEvent(eventName: String, data: Double) {
+        if (reactApplicationContext.hasActiveCatalystInstance()) {
+            reactApplicationContext
+                .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+                ?.emit(eventName, data)
         }
-        
-        // Update accumulated cost for current window
-        val startK = maxOf(0, refIdx - winSize + 1)
-        for (k in startK..minOf(refIdx, refLen - 1)) {
-            updateAccumulatedCost(k, liveIdx)
-        }
-        
-        // Path finding loop with safety limit
-        var iterations = 0
-        val maxIterations = refLen // Prevent infinite loops
-        while (iterations < maxIterations) {
-            iterations++
-            val (step, _, _) = getBestStep()
-            
-            if (step == "live") break
-            
-            refIdx = minOf(refIdx + 1, refLen - 1)
-            
-            // Update accumulated cost for the new refIdx
-            val startL = maxOf(liveIdx - winSize + 1, 0)
-            for (l in startL..liveIdx) {
-                updateAccumulatedCost(refIdx, l)
-            }
-            
-            if (step == "both") break
-        }
-        
-        // Get current ref position (don't go backwards)
-        var currentRefPosition = refIdx
-        if (currentRefPosition < lastRefIdx) {
-            currentRefPosition = lastRefIdx
-        }
-        lastRefIdx = currentRefPosition
-        
-        return currentRefPosition
-    }
-
-    private fun dot(vec1: DoubleArray, vec2: DoubleArray): Double {
-        var sum = 0.0
-        for (i in vec1.indices) {
-            sum += vec1[i] * vec2[i]
-        }
-        return sum
-    }
-
-    private fun argmin(arr: DoubleArray, length: Int): Int {
-        var minIdx = 0
-        var minVal = arr[0]
-        for (i in 1 until length) {
-            if (arr[i] < minVal) {
-                minVal = arr[i]
-                minIdx = i
-            }
-        }
-        return minIdx
-    }
-
-    private fun updateAccumulatedCost(refIndex: Int, liveIndex: Int) {
-        if (liveIndex >= accumulatedCost[0].size) {
-            Log.w(TAG, "Live index $liveIndex exceeds matrix width")
-            return
-        }
-        
-        val refVec = refFeaturegram[refIndex]
-        val liveVec = liveFeaturegram[liveIndex]
-        val cost = 1.0 - dot(refVec, liveVec)
-        
-        if (refIndex == 0 && liveIndex == 0) {
-            accumulatedCost[refIndex][liveIndex] = cost
-            return
-        }
-        
-        val steps = mutableListOf<Double>()
-        
-        if (refIndex > 0 && liveIndex > 0) {
-            steps.add(accumulatedCost[refIndex - 1][liveIndex - 1] + diagWeight * cost)
-        }
-        if (refIndex > 0) {
-            steps.add(accumulatedCost[refIndex - 1][liveIndex] + cost)
-        }
-        if (liveIndex > 0) {
-            steps.add(accumulatedCost[refIndex][liveIndex - 1] + cost)
-        }
-        
-        accumulatedCost[refIndex][liveIndex] = steps.minOrNull() ?: cost
-    }
-
-    private fun getBestStep(): Triple<String, Int, Int> {
-        // Safety bounds checks
-        if (liveIdx < 0 || refIdx < 0 || refIdx >= refLen) {
-            return Triple("live", refIdx, liveIdx)
-        }
-        if (liveIdx >= accumulatedCost[0].size) {
-            return Triple("live", refIdx, liveIdx)
-        }
-        
-        val rowCosts = DoubleArray(liveIdx + 1) { i -> 
-            if (i < accumulatedCost[refIdx].size) accumulatedCost[refIdx][i] else Double.POSITIVE_INFINITY
-        }
-        val colCosts = DoubleArray(refIdx + 1) { i -> 
-            if (liveIdx < accumulatedCost[i].size) accumulatedCost[i][liveIdx] else Double.POSITIVE_INFINITY
-        }
-        
-        var bestT = argmin(rowCosts, rowCosts.size)
-        var bestJ = argmin(colCosts, colCosts.size)
-        var step: String
-        
-        if (accumulatedCost[bestJ][liveIdx] < accumulatedCost[refIdx][bestT]) {
-            bestT = liveIdx
-            step = "live"
-        } else if (accumulatedCost[bestJ][liveIdx] > accumulatedCost[refIdx][bestT]) {
-            bestJ = refIdx
-            step = "ref"
-        } else {
-            bestT = liveIdx
-            bestJ = refIdx
-            step = "both"
-        }
-        
-        if (bestT == liveIdx && bestJ == refIdx) step = "both"
-        if (liveIdx < winSize) step = "both"
-        if (runCount >= maxRunCount) {
-            step = if (prevStep == "ref") "live" else "ref"
-        }
-        
-        if (step == "both" || prevStep != step) {
-            runCount = 1
-        } else {
-            runCount += 1
-        }
-        
-        prevStep = step
-        
-        if (refIdx == refLen - 1) step = "live"
-        
-        return Triple(step, bestJ, bestT)
-    }
-
-    private fun resetDTWState() {
-        for (i in accumulatedCost.indices) {
-            for (j in accumulatedCost[i].indices) {
-                accumulatedCost[i][j] = Double.POSITIVE_INFINITY
-            }
-        }
-        refIdx = 0
-        liveIdx = -1
-        prevStep = "---"
-        runCount = 1
-        lastRefIdx = 0
-        liveFeaturegram.clear()
     }
 
     private fun sendFrameEvent(refPosition: Int, pitch: Double, probability: Double) {
