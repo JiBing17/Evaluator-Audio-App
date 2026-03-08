@@ -200,7 +200,9 @@ export function applyNoteColors(
 
   // fast lookup map from index -> color
   const colorMap = new Map<number, string>();
-  (noteColors || []).forEach((n) => colorMap.set(n.index, n.color));
+  (noteColors || [])
+    .filter((n) => n != null)
+    .forEach((n) => colorMap.set(n.index, n.color));
 
   // Clear previous colors for notes not in map
   // allNotes.forEach((gNote) => {
@@ -355,7 +357,7 @@ export function buildOsmdHtmlForNative(mxmlString: string) {
 
             // Build fast lookup map
             const colorMap = new Map();
-            (noteColors || []).forEach(n => colorMap.set(n.index, n.color));
+            (noteColors || []).filter(n => n != null).forEach(n => colorMap.set(n.index, n.color));
 
             // Apply colors
             allGraphicalNotes.forEach((gNote, idx) => {

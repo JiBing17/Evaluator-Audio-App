@@ -15,6 +15,13 @@ import kotlin.Float
 
 class FFTModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaModule(reactContext) {
     var cFC: Array<FloatArray> = emptyArray()
+    
+    // Pre-allocated FFT and buffers to avoid per-call allocations
+    private var fftLib: FFT? = null
+    private var lastFftSize: Int = 0
+    private var signalBuffer: FloatArray? = null
+    private var amplitudesBuffer: FloatArray? = null
+    private val chromaVec = FloatArray(12)
 
     override fun getName() = "FFTModule"
 
@@ -38,31 +45,37 @@ class FFTModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaMod
     @ReactMethod
     fun fft(signalDataIn: ReadableArray, promise: Promise) {
         try {
-            val fftLib = FFT(signalDataIn.size(), HannWindow())
+            val size = signalDataIn.size()
+            
+            // Lazily initialize or reinitialize FFT if size changed
+            if (fftLib == null || lastFftSize != size) {
+                fftLib = FFT(size, HannWindow())
+                lastFftSize = size
+                signalBuffer = FloatArray(size)
+                amplitudesBuffer = FloatArray(size / 2)
+            }
+            
+            val signalData = signalBuffer!!
+            val amplitudes = amplitudesBuffer!!
 
-            val signalData = FloatArray(signalDataIn.size())
-            for (i in signalData.indices) {
+            // Copy input to buffer
+            for (i in 0 until size) {
                 signalData[i] = signalDataIn.getDouble(i).toFloat()
             }
 
-            fftLib.forwardTransform(signalData)
+            fftLib!!.forwardTransform(signalData)
+            fftLib!!.modulus(signalData, amplitudes)
 
-            val amplitudes = FloatArray(signalData.size / 2)
-            fftLib.modulus(signalData, amplitudes)
-
-            val chromaVec = FloatArray(12)
+            // Compute chroma
             for (i in 0..11) {
                 var sum = 0f
-
-                for (j in 0..(amplitudes.size - 1)) {
+                for (j in amplitudes.indices) {
                     sum += this.cFC[i][j] * amplitudes[j] * amplitudes[j]
                 }
-
                 chromaVec[i] = sum
             }
 
             val result = Arguments.fromArray(chromaVec)
-
             promise.resolve(result)
         } catch (e: Exception) {
             promise.reject("FFT_ERROR", e)

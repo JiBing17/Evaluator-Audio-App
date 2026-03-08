@@ -26,6 +26,7 @@ class MainApplication : Application(), ReactApplication {
               add(FFTPackage())
               add(PitchDetectionPackage())
               add(AudioPerformancePackage())
+              add(OnlineTimeWarpingPackage())
             }
 
           override fun getJSMainModuleName(): String = ".expo/.virtual-metro-entry"

@@ -5,6 +5,7 @@ import {
   TouchableOpacity,
   StyleSheet,
   TextInput,
+  Switch,
 } from "react-native";
 
 import {
@@ -15,12 +16,6 @@ import {
 } from "react-native";
 
 import { requestMicrophonePermission } from "../utils/liveMicUtils";
-
-import { CENSFeatures } from "../audio/FeaturesCENS";
-import { FeaturesConstructor } from "../audio/Features";
-import { CSVRow, loadCsvInfo } from "../utils/csvParsingUtils";
-import { getScoreCSVData } from "../score_name_to_data_map/unifiedScoreMap";
-
 import {
   intonationToNoteColor,
   calculateSingleNoteIntonation,
@@ -29,6 +24,13 @@ import {
   MISTAKE_THRESHOLD,
   SEMITONE_FILTER_THRESHOLD,
 } from "../audio/Intonation";
+
+import { CSVRow, loadCsvInfo } from "../utils/csvParsingUtils";
+import {
+  getScoreCSVData,
+  getScoreRefAudio,
+} from "../score_name_to_data_map/unifiedScoreMap";
+
 import { NoteColor } from "../utils/musicXmlUtils";
 
 import { PerformanceData } from "./PerformanceStats";
@@ -37,8 +39,7 @@ import { getCurrentUser, savePerformanceData } from "../utils/accountUtils";
 interface PerformanceScreenProps {
   score: string; // Selected score name
   dispatch: (action: { type: string; payload?: any }) => void; // Dispatch function used to update global state
-  bpm?: number; // Optional BPM number,
-  FeaturesCls?: FeaturesConstructor<any>;
+  bpm?: number; // Optional BPM number
   state: any;
 }
 
@@ -46,6 +47,14 @@ interface PerformanceScreenProps {
 const ADVANCE_THRESHOLD = MISTAKE_THRESHOLD;
 const MIN_ADVANCE_TIME = 10; // ms
 const SAME_PITCH_WAIT_FRACTION = 0.5;
+
+const SAMPLE_RATE = 44100;
+const FRAME_SIZE = 4096;
+
+// DTW parameters
+const DTW_WINDOW_SIZE = 50;
+const DTW_MAX_RUN_COUNT = 3;
+const DTW_DIAG_WEIGHT = 0.75;
 
 let AudioPerformanceModule: any;
 if (Platform.OS === "android") {
@@ -64,7 +73,6 @@ export default function PerformanceScreen({
   score,
   dispatch,
   bpm = 100,
-  FeaturesCls = CENSFeatures,
   state,
 }: PerformanceScreenProps) {
   const expNoteIdxRef = useRef<number>(0);
@@ -85,9 +93,16 @@ export default function PerformanceScreen({
   const [isProcessing, setIsProcessing] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
 
+   const [useDTWMode, setUseDTWMode] = useState(true); // true = DTW, false = Note-by-Note
+  const useDTWModeRef = useRef(true); // Ref to access current mode in event handler
   const updateScheduled = useRef<boolean>(false);
   const latestBeat = useRef<number>(0);
   const lastDispatchedBeat = useRef<number | null>(null);
+
+  // Keep ref in sync with state
+  useEffect(() => {
+    useDTWModeRef.current = useDTWMode;
+  }, [useDTWMode]);
 
   const scheduleBeatUpdate = (beat: number) => {
     latestBeat.current = beat;
@@ -106,8 +121,8 @@ export default function PerformanceScreen({
   useEffect(() => {
     console.log("Adding subscription to audio events");
     const subscription = audioEvents.addListener(
-      "onPitchDetected",
-      handlePitchUpdate,
+      "onAudioFrame",
+      handleAudioFrame,
     );
     console.log("Subscription:", subscription);
 
@@ -118,6 +133,72 @@ export default function PerformanceScreen({
       setIsProcessing(false);
     };
   }, [dispatch]);
+
+  /**
+   * Handle audio frame events from native module.
+   * Event contains: { refPosition: number, pitch: number, probability: number }
+   *
+   * In DTW mode: refPosition is the DTW-aligned position in the reference sequence.
+   * In Note-by-Note mode: we ignore refPosition and use pitch to advance.
+   */
+  const handleAudioFrame = (event: {
+    refPosition: number;
+    pitch: number;
+    probability: number;
+  }) => {
+    const { refPosition, pitch, probability } = event;
+
+    if (useDTWModeRef.current) {
+      // DTW Mode: Use time-based tracking from DTW alignment
+      // refPosition is -1 if DTW is not initialized
+      if (refPosition < 0) {
+        return;
+      }
+
+      // Convert reference position to time in seconds
+      // Each frame is FRAME_SIZE samples at SAMPLE_RATE Hz
+      // refPosition 0 = time 0, refPosition 1 = time 0.093s, etc.
+      const estTime = (refPosition * FRAME_SIZE) / SAMPLE_RATE;
+
+      // Use DTW-aligned time tracking
+      handleTimePitchUpdate(estTime, pitch, probability);
+    } else {
+      // Note-by-Note Mode: Use pitch-based advancement
+      if (pitch > 0 && probability > 0.4) {
+        handlePitchUpdate(pitch);
+      }
+    }
+  };
+
+  /**
+   * Load reference audio and initialize native DTW.
+   * Audio is loaded and CENS features are computed entirely in native code
+   * to avoid memory issues from large data transfers over the bridge.
+   */
+  const initializeDTW = async (scoreName: string): Promise<boolean> => {
+    try {
+      console.log("-- Initializing native DTW...");
+
+      // Get reference audio URI
+      const refAudioUri = getScoreRefAudio(scoreName);
+      console.log("-- Reference audio URI:", refAudioUri);
+
+      // Initialize native DTW with audio URL - native code will download and process
+      console.log("-- Sending URL to native DTW (audio loaded natively)...");
+      await AudioPerformanceModule.initializeDTWFromUrl(
+        refAudioUri,
+        DTW_WINDOW_SIZE,
+        DTW_MAX_RUN_COUNT,
+        DTW_DIAG_WEIGHT,
+      );
+      console.log("-- Native DTW initialized successfully");
+
+      return true;
+    } catch (e) {
+      console.error("Failed to initialize DTW:", e);
+      return false;
+    }
+  };
 
   const runPerformance = async () => {
     const hasPermission = await requestMicrophonePermission();
@@ -146,11 +227,24 @@ export default function PerformanceScreen({
     csvDataRef.current = noteTable;
 
     console.log("Isplaying=", state.playing, "\nDispatch start/stop");
+    console.log("Mode:", useDTWMode ? "DTW" : "Note-by-Note");
     dispatch({ type: "SET_NOTE_COLORS", payload: [] });
     dispatch({ type: "start/stop" });
     setIsPaused(false);
     setPerformanceComplete(false);
     setPerformanceSaved(false);
+
+    // Initialize native DTW with reference audio (only in DTW mode)
+    if (useDTWMode) {
+      const dtwInitialized = await initializeDTW(base);
+      if (!dtwInitialized) {
+        console.warn(
+          "DTW initialization failed - score following may not work correctly",
+        );
+      }
+    } else {
+      console.log("Note-by-Note mode - skipping DTW initialization");
+    }
 
     // Start Native Audio Engine
     if (AudioPerformanceModule?.startProcessing) {
@@ -317,7 +411,7 @@ export default function PerformanceScreen({
     }
   };
 
-  const handleTimePitchUpdate = (estTime: number, freq: number) => {
+  const handleTimePitchUpdate = (estTime: number, freq: number, probability: number) => {
     const noteTable: CSVRow[] = csvDataRef.current;
     if (!noteTable || expNoteIdxRef.current >= noteTable.length) return;
 
@@ -325,12 +419,19 @@ export default function PerformanceScreen({
     const targetNote = noteTable[currentIndex];
 
     // 1. Buffer pitch for current note
-    if (freq > 0) {
+    if (freq > 0 && probability > 0.4) {
       const midi = hzToMidi(freq);
-      const intonation = calculateSingleNoteIntonation(midi, targetNote.midi);
+      const sampleIntonation = calculateSingleNoteIntonation(midi, targetNote.midi);
 
-      if (!Number.isNaN(intonation)) {
-        pitchBufferRef.current.push(intonation);
+      if (!Number.isNaN(sampleIntonation)) {
+        // Median Buffering (same as Note-by-Note)
+        const buffer = pitchBufferRef.current;
+        buffer.push(sampleIntonation);
+        if (buffer.length > 5) buffer.shift(); // Keep last 5 samples
+
+        const intonation = listMedian(buffer);
+        // Accumulate the robust intonation for the entire note
+        noteMistakesRef.current.push(intonation);
       }
     }
 
@@ -339,10 +440,10 @@ export default function PerformanceScreen({
       currentIndex + 1 < noteTable.length &&
       estTime >= noteTable[currentIndex + 1].refTime
     ) {
-      // Color now-finished note based on buffer
+      // Color now-finished note based on aggregate
       const medianIntonation =
-        pitchBufferRef.current.length > 0
-          ? listMedian(pitchBufferRef.current)
+        noteMistakesRef.current.length > 0
+          ? listMedian(noteMistakesRef.current)
           : 0;
 
       const noteColor = intonationToNoteColor(medianIntonation, currentIndex);
@@ -359,8 +460,9 @@ export default function PerformanceScreen({
       intonationDataRef.current.push(medianIntonation);
       durationRatioDataRef.current.push(1.0); // Default for time-based tracking
 
-      // Flush the buffer for the next note
+      // Flush the buffers for the next note
       pitchBufferRef.current = [];
+      noteMistakesRef.current = [];
 
       // Advance cursor
       let nextIndex = currentIndex + 1;
@@ -414,6 +516,24 @@ export default function PerformanceScreen({
       {bpm ? (
         <Text style={styles.tempoText}>Reference Tempo: {bpm} BPM</Text>
       ) : null}
+
+      {/* Mode Toggle */}
+      <View style={styles.modeToggleContainer}>
+        <Text style={styles.modeLabel}>Note-by-Note</Text>
+        <Switch
+          value={useDTWMode}
+          onValueChange={setUseDTWMode}
+          disabled={state.playing} // Can't change mode while playing
+          trackColor={{ false: "#767577", true: "#81b0ff" }}
+          thumbColor={useDTWMode ? "#2C3E50" : "#f4f3f4"}
+        />
+        <Text style={styles.modeLabel}>DTW</Text>
+      </View>
+      <Text style={styles.modeDescription}>
+        {useDTWMode
+          ? "DTW: Follows along with your playing tempo"
+          : "Note-by-Note: Advances when correct pitch is detected"}
+      </Text>
 
       {/* Start Performance button */}
       <TouchableOpacity
@@ -548,6 +668,25 @@ const styles = StyleSheet.create({
     textShadowRadius: 4,
     textAlign: "left",
     marginBottom: 8,
+  },
+  modeToggleContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    marginVertical: 8,
+    gap: 8,
+  },
+  modeLabel: {
+    fontSize: 14,
+    color: "#2C3E50",
+    fontWeight: "500",
+  },
+  modeDescription: {
+    fontSize: 12,
+    color: "#666",
+    textAlign: "center",
+    marginBottom: 12,
+    fontStyle: "italic",
   },
   hiddenInput: {
     display: "none",

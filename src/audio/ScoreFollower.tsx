@@ -114,8 +114,9 @@ export class ScoreFollower {
    * @param b Number of steps to go back
    * @returns Backwards path as list of (refIndex, liveIndex)
    */
-  getBackwardsPath(b: number): [number, number][] {
-    const costMatrix = this.otw.accumulatedCost;
+  async getBackwardsPath(b: number): Promise<[number, number][]> {
+    // Fetch the accumulated cost matrix from native module
+    const costMatrix = await this.otw.fetchAccumulatedCost();
     let j = this.otw.refIdx;
     let t = this.otw.liveIdx;
     const backwardsPath: [number, number][] = [];
