@@ -45,10 +45,6 @@ function buildMappings() {
 
   const pieceNames = fs.readdirSync(PUBLIC_DIR)
     .filter(name => {
-      if (name !== "air_on_the_g_string") {
-        console.warn(`Skipping ${name} - not in the list of expected pieces`);
-        return false;
-      }
       const fullPath = path.join(PUBLIC_DIR, name);
       return fs.statSync(fullPath).isDirectory() && !name.startsWith('.');
     });
