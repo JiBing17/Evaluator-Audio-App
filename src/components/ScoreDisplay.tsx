@@ -174,8 +174,9 @@ export default function ScoreDisplay({
 
   // Memoize the html source to prevent WebView reloading on every render
   const htmlSource = useMemo(() => {
-    return { html: buildOsmdHtmlForNative(baseXml) };
-  }, [baseXml]);
+    const zoom = isSmallScreen ? 1.1 : 0.65;
+    return { html: buildOsmdHtmlForNative(baseXml, zoom) };
+  }, [baseXml, isSmallScreen]);
 
   const prevNoteColorsRef = useRef<NoteColor[]>([]);
 

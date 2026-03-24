@@ -276,11 +276,17 @@ export function applyNoteColors(
  * - Extracts beats-per-measure and tempo from the XML.
  * - Posts a `loaded` message back to the React Native layer via `window.ReactNativeWebView.postMessage(...)`.
  *
- * @param xml - MusicXML content to render.
- * @param defaultZoom - Default zoom factor to apply (defaults to 0.45 for mobile).
+ * @param mxmlString - MusicXML content to render.
+ * @param zoom - Zoom level for the sheet music (default 1.0).
+ * @param cursorColor - Color for the playback cursor (default "#49FF2D").
  * @returns A self-contained HTML string for injection into a WebView.
  */
-export function buildOsmdHtmlForNative(mxmlString: string) {
+export function buildOsmdHtmlForNative(
+  mxmlString: string,
+  zoom: number = 0.3,
+  cursorColor: string = "#49FF2D",
+  cursorAlpha: number = 0.2,
+) {
   const escapedXml = mxmlString
     .replace(/\\/g, "\\\\")
     .replace(/`/g, "\\`")
@@ -313,10 +319,12 @@ export function buildOsmdHtmlForNative(mxmlString: string) {
               drawTitle: false,
               drawPartNames: false,
               followCursor: true,
+              cursorsOptions: [{ type: 0, color: "${cursorColor}", follow: true, alpha: ${cursorAlpha} }]
             }
           );
 
           await osm.load(\`${escapedXml}\`);
+          osm.zoom = ${zoom};
           osm.render();
 
           // ===== Expose osm & cursor globally =====
@@ -325,7 +333,9 @@ export function buildOsmdHtmlForNative(mxmlString: string) {
           osm.cursor.show();
           osm.cursor.CursorOptions = { 
             ...osm.cursor.CursorOptions, 
-            follow: true 
+            follow: true,
+            color: "${cursorColor}",
+            alpha: ${cursorAlpha}
           };
 
           console.log("[WebView] OSMD loaded and cursor initialized");

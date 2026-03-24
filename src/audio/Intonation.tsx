@@ -8,8 +8,8 @@ export const MISTAKE_THRESHOLD = 0.5;
 export const SEMITONE_FILTER_THRESHOLD = 6;
 export const OCTAVE_FILTER_THRESHOLD = 2;
 export const COLOR_NEUTRAL = "#000000";
-export const COLOR_SHARP = "#00ff00";
-export const COLOR_FLAT = "#ff0000";
+export const COLOR_SHARP = "#FFAE3C";
+export const COLOR_FLAT = "#4A86FF";
 
 const AGGREGATE_DIVISOR = 1.1;
 const AGGREGATE_DEFAULT_SIZE = 10;
