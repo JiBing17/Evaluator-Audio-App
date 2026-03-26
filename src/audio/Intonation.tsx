@@ -1,15 +1,12 @@
 import { PitchDetector } from "pitchy";
 import { CSVRow, loadCsvInfo } from "../utils/csvParsingUtils";
 import { prepareAudio } from "../utils/audioUtils";
-import { NoteColor } from "../utils/musicXmlUtils";
+import { NoteColor, OSMD_CONFIG } from "../utils/osmdConfig";
 import { NativeModules, Platform } from "react-native";
 
 export const MISTAKE_THRESHOLD = 0.5;
 export const SEMITONE_FILTER_THRESHOLD = 6;
 export const OCTAVE_FILTER_THRESHOLD = 2;
-export const COLOR_NEUTRAL = "#000000";
-export const COLOR_SHARP = "#FFAE3C";
-export const COLOR_FLAT = "#4A86FF";
 
 const AGGREGATE_DIVISOR = 1.1;
 const AGGREGATE_DEFAULT_SIZE = 10;
@@ -44,11 +41,11 @@ export function calculateSingleNoteIntonation(detectedMidi: number, scoreMidi: n
 export function intonationToNoteColor(intonation: number, noteIdx: number): NoteColor {
   let color: string;
   if (Math.abs(intonation) < MISTAKE_THRESHOLD) {
-    color = COLOR_NEUTRAL;
+    color = OSMD_CONFIG.noteColorNeutral;
   } else if (intonation > 0) {
-    color = COLOR_SHARP;
+    color = OSMD_CONFIG.noteColorSharp;
   } else {
-    color = COLOR_FLAT;
+    color = OSMD_CONFIG.noteColorFlat;
   }
 
   return { index: noteIdx, color: color };

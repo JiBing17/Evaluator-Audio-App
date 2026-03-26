@@ -29,7 +29,7 @@ import {
 import { PerformanceData } from "../components/PerformanceStats"
 import { getCurrentUser, savePerformanceData } from "../utils/accountUtils";
 import { calculateIntonation, intonationToNoteColor, testIntonation } from "../audio/Intonation";
-import { NoteColor } from "../utils/musicXmlUtils";
+import { NoteColor } from "../utils/osmdConfig";
 
 interface ScoreFollowerTestProps {
   score: string; // Selected score name

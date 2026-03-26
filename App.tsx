@@ -42,7 +42,7 @@ export default function App() {
       playing: false, // Whether the audio is playing
       score: "", // The score name we are currently on (followed with .musicxml)
       accompanimentSound: null, // The accompaniment sound (no applicable in evalautor project but here just in case )
-      tempo: null, // The tempo of the current score  (extracted from musicxml file using helper function "extractTempo()")
+      tempo: null, // The tempo of the current score  (extracted from musicxml file using helper function "sharedExtractTempo()")
       scores: [], // The list of scores to choose from
       referenceAudioUri: null as string | null, // Reference to score's top voice audio uri (first instrument)
       estimatedBeat: null as number | null, // Beat value we think the soloist is at

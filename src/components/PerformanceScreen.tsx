@@ -31,7 +31,7 @@ import {
   getScoreRefAudio,
 } from "../score_name_to_data_map/unifiedScoreMap";
 
-import { NoteColor } from "../utils/musicXmlUtils";
+import { NoteColor } from "../utils/osmdConfig";
 
 import { PerformanceData } from "./PerformanceStats";
 import { getCurrentUser, savePerformanceData } from "../utils/accountUtils";
