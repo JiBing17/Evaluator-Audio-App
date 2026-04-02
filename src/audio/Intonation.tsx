@@ -4,7 +4,7 @@ import { prepareAudio } from "../utils/audioUtils";
 import { NoteColor, OSMD_CONFIG } from "../utils/osmdConfig";
 import { NativeModules, Platform } from "react-native";
 
-export const MISTAKE_THRESHOLD = 0.5;
+export const MISTAKE_THRESHOLD = 0.25;
 export const SEMITONE_FILTER_THRESHOLD = 6;
 export const OCTAVE_FILTER_THRESHOLD = 2;
 

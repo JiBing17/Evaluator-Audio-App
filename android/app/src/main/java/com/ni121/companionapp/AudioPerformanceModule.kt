@@ -23,8 +23,8 @@ class AudioPerformanceModule(reactContext: ReactApplicationContext) : ReactConte
     
     private val SAMPLE_RATE = 44100
     private val PROCESSING_BUFFER_SIZE = 4096
-    private val RMS_GATE = 0.01
-    private val YIN_PROB_GATE = 0.4
+    private val RMS_GATE = 0.005
+    private val YIN_PROB_GATE = 0.6 
 
     private val MIN_BUFFER_SIZE = AudioRecord.getMinBufferSize(
         SAMPLE_RATE,
