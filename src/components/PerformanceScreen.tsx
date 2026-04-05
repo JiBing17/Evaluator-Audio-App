@@ -83,6 +83,7 @@ export default function PerformanceScreen({
   const noteMistakesRef = useRef<number[]>([]); // Buffer for mistake categorization
 
   const lastAdvanceTimeRef = useRef<number>(0);
+  const lastInitializedScoreRef = useRef<string | null>(null);
 
   const intonationDataRef = useRef<number[]>([]);
   const durationRatioDataRef = useRef<number[]>([]);
@@ -200,6 +201,22 @@ export default function PerformanceScreen({
     }
   };
 
+  const resetPerformanceState = () => {
+    expNoteIdxRef.current = 0;
+    noteColorsRef.current = [];
+    pitchBufferRef.current = []; // Reset buffer
+    noteMistakesRef.current = [];
+
+    lastAdvanceTimeRef.current = Date.now();
+    intonationDataRef.current = [];
+    durationRatioDataRef.current = [];
+
+    dispatch({ type: "SET_NOTE_COLORS", payload: [] });
+    dispatch({ type: "SET_ESTIMATED_BEAT", payload: 0 });
+    setPerformanceComplete(false);
+    setPerformanceSaved(false);
+  };
+
   const runPerformance = async () => {
     const hasPermission = await requestMicrophonePermission();
     if (!hasPermission) {
@@ -212,14 +229,7 @@ export default function PerformanceScreen({
 
     if (!score) return;
 
-    expNoteIdxRef.current = 0;
-    noteColorsRef.current = [];
-    pitchBufferRef.current = []; // Reset buffer
-    noteMistakesRef.current = [];
-
-    lastAdvanceTimeRef.current = Date.now();
-    intonationDataRef.current = [];
-    durationRatioDataRef.current = [];
+    resetPerformanceState();
 
     const base = score.replace(/\.musicxml$/, "");
     const csvUri = getScoreCSVData(base);
@@ -228,19 +238,33 @@ export default function PerformanceScreen({
 
     console.log("Isplaying=", state.playing, "\nDispatch start/stop");
     console.log("Mode:", useDTWMode ? "DTW" : "Note-by-Note");
-    dispatch({ type: "SET_NOTE_COLORS", payload: [] });
     dispatch({ type: "start/stop" });
     setIsPaused(false);
-    setPerformanceComplete(false);
-    setPerformanceSaved(false);
 
     // Initialize native DTW with reference audio (only in DTW mode)
     if (useDTWMode) {
-      const dtwInitialized = await initializeDTW(base);
-      if (!dtwInitialized) {
-        console.warn(
-          "DTW initialization failed - score following may not work correctly",
-        );
+      if (lastInitializedScoreRef.current === base) {
+        console.log("-- Score has not changed, fast resetting native DTW...");
+        try {
+          if (AudioPerformanceModule?.fastResetDTW) {
+            await AudioPerformanceModule.fastResetDTW();
+          }
+        } catch (e) {
+          console.warn("fastResetDTW failed, falling back to full initialization", e);
+          const dtwInitialized = await initializeDTW(base);
+          if (dtwInitialized) {
+            lastInitializedScoreRef.current = base;
+          }
+        }
+      } else {
+        const dtwInitialized = await initializeDTW(base);
+        if (dtwInitialized) {
+          lastInitializedScoreRef.current = base;
+        } else {
+          console.warn(
+            "DTW initialization failed - score following may not work correctly",
+          );
+        }
       }
     } else {
       console.log("Note-by-Note mode - skipping DTW initialization");
@@ -280,19 +304,7 @@ export default function PerformanceScreen({
     setIsProcessing(false);
     setIsPaused(false);
 
-    expNoteIdxRef.current = 0;
-    noteColorsRef.current = [];
-    pitchBufferRef.current = []; // Reset buffer
-    noteMistakesRef.current = [];
-
-    lastAdvanceTimeRef.current = Date.now();
-    intonationDataRef.current = [];
-    durationRatioDataRef.current = [];
-
-    dispatch({ type: "SET_NOTE_COLORS", payload: [] });
-    dispatch({ type: "SET_ESTIMATED_BEAT", payload: 0 });
-    setPerformanceComplete(false);
-    setPerformanceSaved(false);
+    resetPerformanceState();
 
     await AudioPerformanceModule.startProcessing();
     setIsProcessing(true);
@@ -510,6 +522,11 @@ export default function PerformanceScreen({
     alert("Performance saved successfully!");
   };
 
+  const handleModeChange = (value: boolean) => {
+    setUseDTWMode(value);
+    resetPerformanceState();
+  };
+
   return (
     <View>
       {/* Show tempo of selected score to be played */}
@@ -522,7 +539,7 @@ export default function PerformanceScreen({
         <Text style={styles.modeLabel}>Note-by-Note</Text>
         <Switch
           value={useDTWMode}
-          onValueChange={setUseDTWMode}
+          onValueChange={handleModeChange}
           disabled={state.playing} // Can't change mode while playing
           trackColor={{ false: "#767577", true: "#81b0ff" }}
           thumbColor={useDTWMode ? "#2C3E50" : "#f4f3f4"}

@@ -39,6 +39,10 @@ class DynamicTimeWarping {
         Log.d(TAG, "DTW initialized with refLen=$refLen, winSize=$winSize, maxRunCount=$maxRunCount")
     }
 
+    fun fastReset() {
+        resetState()
+    }
+
     fun resetState() {
         if (!isInitialized) return
         for (i in accumulatedCost.indices) {

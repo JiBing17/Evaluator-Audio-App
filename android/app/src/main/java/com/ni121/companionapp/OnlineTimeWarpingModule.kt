@@ -237,6 +237,12 @@ class OnlineTimeWarpingModule(reactContext: ReactApplicationContext) : ReactCont
     }
 
     @ReactMethod
+    fun fastReset(promise: Promise) {
+        // Clears liveFeaturegram and runtime vars, preserves refFeaturegram
+        reset(promise)
+    }
+
+    @ReactMethod
     fun getState(promise: Promise) {
         try {
             val state = com.facebook.react.bridge.Arguments.createMap()
