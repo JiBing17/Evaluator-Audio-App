@@ -9,6 +9,7 @@ import RNPickerSelect from "react-native-picker-select";
 import React, { useEffect } from "react";
 import Icon from "react-native-vector-icons/FontAwesome";
 import scoreToMidi from "../score_name_to_data_map/scoreToMidi";
+import unifiedScoreMap from "../score_name_to_data_map/unifiedScoreMap";
 
 export function Score_Select({
   // Data passed from App.tsx
@@ -28,16 +29,16 @@ export function Score_Select({
 }) {
   // Array of score names used to render the available scores for the app
   // Entries are used within a hashmap to access certain data needed for the selected score
-  const musicxmlFiles: string[] = [
-    "schumann_melody.musicxml",
-    "go_tell_aunt_rhody.musicxml",
-    "air_on_the_g_string.musicxml",
-    "ode_to_joy.musicxml",
-  ]
+  // const musicxmlFiles: string[] = [
+  //   "schumann_melody.musicxml",
+  //   "go_tell_aunt_rhody.musicxml",
+  //   "air_on_the_g_string.musicxml",
+  //   "ode_to_joy.musicxml",
+  // ]
 
-  // const musicxmlFiles: string[] = Object.values(unifiedScoreMap).map((val) => {
-  //   return path.basename(val.csvData.web);
-  // });
+  const musicxmlFiles: string[] = Object.keys(unifiedScoreMap).map((val) => {
+    return val + ".musicxml";
+  });
 
   // Populate our global stat.scores with the given scores in musicxmlFiles
   useEffect(() => {

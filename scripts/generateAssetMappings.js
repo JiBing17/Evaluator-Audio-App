@@ -1,0 +1,276 @@
+const fs = require("fs");
+const path = require("path");
+
+const ROOT_DIR = path.join(__dirname, "..");
+const PUBLIC_DIR = path.join(ROOT_DIR, "public");
+const SCORE_MAPS_DIR = path.join(ROOT_DIR, "src", "score_name_to_data_map");
+
+const WAV_EXTENSIONS = [".wav"];
+const MIDI_EXTENSIONS = [".mid", ".midi"];
+const CSV_EXTENSIONS = [".csv"];
+const MUSICXML_EXTENSIONS = [".musicxml", ".xml"];
+
+
+function hasAnyExtension(fileName, extensions) {
+  const lower = fileName.toLowerCase();
+  return extensions.some((ext) => lower.endsWith(ext));
+}
+
+function getPieceDirectories() {
+  return fs
+    .readdirSync(PUBLIC_DIR)
+    .filter((name) => {
+      const fullPath = path.join(PUBLIC_DIR, name);
+      return fs.statSync(fullPath).isDirectory();
+    })
+    .sort();
+}
+
+function toPublicRequirePath(pieceName, fileName) {
+  return ["..", "..", "public", pieceName, fileName].join("/");
+}
+
+function toAssetsRequirePath(pieceName, fileName) {
+  return ["..", "..", "assets", pieceName, fileName].join("/");
+}
+
+function escapeTemplateLiteral(text) {
+  return text
+    .replace(/\\/g, "\\\\")
+    .replace(/`/g, "\\`")
+    .replace(/\$\{/g, "\\${");
+}
+
+function classifyFiles(piecePath) {
+  const files = fs
+    .readdirSync(piecePath)
+    .filter((name) => fs.statSync(path.join(piecePath, name)).isFile())
+    .sort();
+
+  return {
+    wav: files.filter((name) => hasAnyExtension(name, WAV_EXTENSIONS)),
+    midi: files.filter((name) => hasAnyExtension(name, MIDI_EXTENSIONS)),
+    csv: files.filter((name) => hasAnyExtension(name, CSV_EXTENSIONS)),
+    musicxml: files.filter((name) => hasAnyExtension(name, MUSICXML_EXTENSIONS)),
+    all: files,
+  };
+}
+
+function validateStructure(pieceName, fileGroups) {
+  const issues = [];
+
+  if (fileGroups.wav.length !== 1) {
+    issues.push(`expected 1 wav, found ${fileGroups.wav.length}`);
+  }
+  if (fileGroups.midi.length !== 1) {
+    issues.push(`expected 1 midi, found ${fileGroups.midi.length}`);
+  }
+  if (fileGroups.csv.length !== 1) {
+    issues.push(`expected 1 csv, found ${fileGroups.csv.length}`);
+  }
+  if (fileGroups.musicxml.length !== 1) {
+    issues.push(`expected 1 musicxml, found ${fileGroups.musicxml.length}`);
+  }
+
+  if (issues.length > 0) {
+    return `${pieceName}: ${issues.join("; ")}`;
+  }
+
+  return null;
+}
+
+function buildMappings() {
+  const pieceNames = getPieceDirectories();
+  const errors = [];
+  const warnings = [];
+
+  const unifiedMap = {};
+  const midiMap = {};
+  const musicxmlMap = {};
+
+  pieceNames.forEach((pieceName) => {
+    const piecePath = path.join(PUBLIC_DIR, pieceName);
+    const fileGroups = classifyFiles(piecePath);
+
+    const validationIssue = validateStructure(pieceName, fileGroups);
+    if (validationIssue) {
+      warnings.push(`[skip] ${validationIssue}`);
+      errors.push({ pieceName, missing: ["invalid folder structure"] });
+      return;
+    }
+
+    const wavFile = fileGroups.wav[0];
+    const midiFile = fileGroups.midi[0];
+    const csvFile = fileGroups.csv[0];
+    const xmlFile = fileGroups.musicxml[0];
+
+    const xmlContent = fs.readFileSync(path.join(piecePath, xmlFile), "utf8");
+
+    unifiedMap[pieceName] = {
+      refAudio: {
+        web: `/${pieceName}/${wavFile}`,
+        iosRequirePath: toAssetsRequirePath(pieceName, wavFile),
+        androidRequirePath: toAssetsRequirePath(pieceName, wavFile),
+      },
+      csvData: {
+        web: `/${pieceName}/${csvFile}`,
+        iosRequirePath: toAssetsRequirePath(pieceName, csvFile),
+        androidRequirePath: toAssetsRequirePath(pieceName, csvFile),
+      },
+    };
+
+    midiMap[xmlFile] = toAssetsRequirePath(pieceName, midiFile);
+    musicxmlMap[xmlFile] = xmlContent;
+  });
+
+  return {
+    unifiedMap,
+    midiMap,
+    musicxmlMap,
+    errors,
+    warnings,
+  };
+}
+
+function writeUnifiedScoreMap(unifiedMap) {
+  const keys = Object.keys(unifiedMap).sort();
+  const entries = keys
+    .map((key) => {
+      const score = unifiedMap[key];
+      return [
+        `  ${JSON.stringify(key)}: {`,
+        "    refAudio: {",
+        `      web: ${JSON.stringify(score.refAudio.web)},`,
+        `      ios: require(${JSON.stringify(score.refAudio.iosRequirePath)}),`,
+        `      android: require(${JSON.stringify(score.refAudio.androidRequirePath)}),`,
+        "    },",
+        "    csvData: {",
+        `      web: ${JSON.stringify(score.csvData.web)},`,
+        `      ios: require(${JSON.stringify(score.csvData.iosRequirePath)}),`,
+        `      android: require(${JSON.stringify(score.csvData.androidRequirePath)}),`,
+        "    },",
+        "  },",
+      ].join("\n");
+    })
+    .join("\n\n");
+
+  const content = [
+    "import { Platform } from \"react-native\";",
+    "import { Asset } from \"expo-asset\";",
+    "",
+    "interface AssetMap {",
+    "  web: string;",
+    "  ios: any;",
+    "  android: any;",
+    "}",
+    "",
+    "interface ScoreDataFiles {",
+    "  refAudio: AssetMap;",
+    "  csvData: AssetMap;",
+    "}",
+    "",
+    "// AUTO-GENERATED BY scripts/generateAssetMappings.js",
+    "export const unifiedScoreMap: Record<string, ScoreDataFiles> = {",
+    entries,
+    "};",
+    "",
+    "const getPlatformAsset = (assets: AssetMap): string | any => {",
+    "  if (Platform.OS === \"web\") {",
+    "    return assets.web;",
+    "  }",
+    "  if (Platform.OS === \"android\") {",
+    "    return Asset.fromModule(assets.android).uri;",
+    "  }",
+    "  return Asset.fromModule(assets.ios).uri;",
+    "};",
+    "",
+    "export const getScoreRefAudio = (scoreName: string): string | any => {",
+    "  const score = unifiedScoreMap[scoreName];",
+    "  if (!score) throw new Error(`Score not found: ${scoreName}`);",
+    "  return getPlatformAsset(score.refAudio);",
+    "};",
+    "",
+    "export const getScoreCSVData = (scoreName: string): string | any => {",
+    "  const score = unifiedScoreMap[scoreName];",
+    "  if (!score) throw new Error(`Score not found: ${scoreName}`);",
+    "  return getPlatformAsset(score.csvData);",
+    "};",
+    "",
+    "export default unifiedScoreMap;",
+    "",
+  ].join("\n");
+
+  const target = path.join(SCORE_MAPS_DIR, "unifiedScoreMap.ts");
+  fs.writeFileSync(target, content, "utf8");
+}
+
+function writeScoreToMidiMap(midiMap) {
+  const entries = Object.keys(midiMap)
+    .sort()
+    .map((key) => `  ${JSON.stringify(key)}: require(${JSON.stringify(midiMap[key])})`)
+    .join(",\n");
+
+  const content = [
+    "// AUTO-GENERATED BY scripts/generateAssetMappings.js",
+    "const scoreToMidi: Record<string, number> = {",
+    entries,
+    "};",
+    "",
+    "export default scoreToMidi;",
+    "",
+  ].join("\n");
+
+  const target = path.join(SCORE_MAPS_DIR, "scoreToMidi.ts");
+  fs.writeFileSync(target, content, "utf8");
+}
+
+function writeScoreToMusicxmlMap(musicxmlMap) {
+  const entries = Object.keys(musicxmlMap)
+    .sort()
+    .map((key) => {
+      const xml = escapeTemplateLiteral(musicxmlMap[key]);
+      return `  ${JSON.stringify(key)}: \`${xml}\``;
+    })
+    .join(",\n\n");
+
+  const content = [
+    "// AUTO-GENERATED BY scripts/generateAssetMappings.js",
+    "export const scoresData: Record<string, string> = {",
+    entries,
+    "};",
+    "",
+    "export default scoresData;",
+    "",
+  ].join("\n");
+
+  const target = path.join(SCORE_MAPS_DIR, "scoreToMusicxmlMap.ts");
+  fs.writeFileSync(target, content, "utf8");
+}
+
+function main() {
+  const { unifiedMap, midiMap, musicxmlMap, errors, warnings } = buildMappings();
+
+  warnings.forEach((warning) => console.warn(`warning: ${warning}`));
+
+  writeUnifiedScoreMap(unifiedMap)
+  writeScoreToMidiMap(midiMap)
+  writeScoreToMusicxmlMap(musicxmlMap)
+
+  if (errors.length > 0) {
+    console.warn("\nSome pieces were skipped due to missing files:");
+    errors.forEach((error) => {
+      console.warn(`- ${error.pieceName}: ${error.missing.join(", ")}`);
+    });
+  }
+}
+
+if (require.main === module) {
+  main();
+}
+
+module.exports = {
+  buildMappings,
+  writeUnifiedScoreMap,
+  writeScoreToMidiMap,
+  writeScoreToMusicxmlMap,
+};
