@@ -16,14 +16,14 @@ interface ScoreDataFiles {
 export const unifiedScoreMap: Record<string, ScoreDataFiles> = {
   "air_on_the_g_string": {
     refAudio: {
-      web: "/air_on_the_g_string/aotgs_solo_ref.wav",
-      ios: require("../../assets/air_on_the_g_string/aotgs_solo_ref.wav"),
-      android: require("../../assets/air_on_the_g_string/aotgs_solo_ref.wav"),
+      web: "/air_on_the_g_string/air_on_the_g_string.wav",
+      ios: require("../../assets/air_on_the_g_string/air_on_the_g_string.wav"),
+      android: require("../../assets/air_on_the_g_string/air_on_the_g_string.wav"),
     },
     csvData: {
-      web: "/air_on_the_g_string/aotgs_solo_100bpm.csv",
-      ios: require("../../assets/air_on_the_g_string/aotgs_solo_100bpm.csv"),
-      android: require("../../assets/air_on_the_g_string/aotgs_solo_100bpm.csv"),
+      web: "/air_on_the_g_string/air_on_the_g_string.csv",
+      ios: require("../../assets/air_on_the_g_string/air_on_the_g_string.csv"),
+      android: require("../../assets/air_on_the_g_string/air_on_the_g_string.csv"),
     },
   },
 
@@ -133,14 +133,14 @@ export const unifiedScoreMap: Record<string, ScoreDataFiles> = {
 
   "go_tell_aunt_rhody": {
     refAudio: {
-      web: "/go_tell_aunt_rhody/5_go_tell_aunt_rhody-Violoncello50_ref.wav",
-      ios: require("../../assets/go_tell_aunt_rhody/5_go_tell_aunt_rhody-Violoncello50_ref.wav"),
-      android: require("../../assets/go_tell_aunt_rhody/5_go_tell_aunt_rhody-Violoncello50_ref.wav"),
+      web: "/go_tell_aunt_rhody/go_tell_aunt_rhody.wav",
+      ios: require("../../assets/go_tell_aunt_rhody/go_tell_aunt_rhody.wav"),
+      android: require("../../assets/go_tell_aunt_rhody/go_tell_aunt_rhody.wav"),
     },
     csvData: {
-      web: "/go_tell_aunt_rhody/5_go_tell_aunt_rhody_50_performance.csv",
-      ios: require("../../assets/go_tell_aunt_rhody/5_go_tell_aunt_rhody_50_performance.csv"),
-      android: require("../../assets/go_tell_aunt_rhody/5_go_tell_aunt_rhody_50_performance.csv"),
+      web: "/go_tell_aunt_rhody/go_tell_aunt_rhody.csv",
+      ios: require("../../assets/go_tell_aunt_rhody/go_tell_aunt_rhody.csv"),
+      android: require("../../assets/go_tell_aunt_rhody/go_tell_aunt_rhody.csv"),
     },
   },
 
@@ -263,14 +263,14 @@ export const unifiedScoreMap: Record<string, ScoreDataFiles> = {
 
   "ode_to_joy": {
     refAudio: {
-      web: "/ode_to_joy/o2j_ref.wav",
-      ios: require("../../assets/ode_to_joy/o2j_ref.wav"),
-      android: require("../../assets/ode_to_joy/o2j_ref.wav"),
+      web: "/ode_to_joy/ode_to_joy.wav",
+      ios: require("../../assets/ode_to_joy/ode_to_joy.wav"),
+      android: require("../../assets/ode_to_joy/ode_to_joy.wav"),
     },
     csvData: {
-      web: "/ode_to_joy/ode_to_joy_300bpm_NEW.csv",
-      ios: require("../../assets/ode_to_joy/ode_to_joy_300bpm_NEW.csv"),
-      android: require("../../assets/ode_to_joy/ode_to_joy_300bpm_NEW.csv"),
+      web: "/ode_to_joy/ode_to_joy.csv",
+      ios: require("../../assets/ode_to_joy/ode_to_joy.csv"),
+      android: require("../../assets/ode_to_joy/ode_to_joy.csv"),
     },
   },
 
@@ -289,14 +289,14 @@ export const unifiedScoreMap: Record<string, ScoreDataFiles> = {
 
   "schumann_melody": {
     refAudio: {
-      web: "/schumann_melody/ref.wav",
-      ios: require("../../assets/schumann_melody/ref.wav"),
-      android: require("../../assets/schumann_melody/ref.wav"),
+      web: "/schumann_melody/schumann_melody.wav",
+      ios: require("../../assets/schumann_melody/schumann_melody.wav"),
+      android: require("../../assets/schumann_melody/schumann_melody.wav"),
     },
     csvData: {
-      web: "/schumann_melody/schumann_melody_4sec.csv",
-      ios: require("../../assets/schumann_melody/schumann_melody_4sec.csv"),
-      android: require("../../assets/schumann_melody/schumann_melody_4sec.csv"),
+      web: "/schumann_melody/schumann_melody.csv",
+      ios: require("../../assets/schumann_melody/schumann_melody.csv"),
+      android: require("../../assets/schumann_melody/schumann_melody.csv"),
     },
   },
 
