@@ -16,9 +16,6 @@ export const SEMITONE_FILTER_THRESHOLD_STEP = 0.1;
 export const OCTAVE_FILTER_THRESHOLD_MIN = 0;
 export const OCTAVE_FILTER_THRESHOLD_MAX = 5;
 export const OCTAVE_FILTER_THRESHOLD_STEP = 1;
-export const COLOR_NEUTRAL = "#000000";
-export const COLOR_SHARP = "#00ff00";
-export const COLOR_FLAT = "#ff0000";
 
 const AGGREGATE_DIVISOR = 1.1;
 const AGGREGATE_DEFAULT_SIZE = 10;
