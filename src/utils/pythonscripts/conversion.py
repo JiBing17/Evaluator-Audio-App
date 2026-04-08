@@ -4,7 +4,7 @@ import platform
 import subprocess
 from pathlib import Path
 
-from companioncode import create_alignment_csv
+from companioncode import create_alignment_csv, populate_alignment_csv
 
 
 def resolve_musescore_executable(user_provided: str | None) -> str:
@@ -114,6 +114,7 @@ def process_one_midi(musescore_exe: str, midi_file: Path, base_out_dir: Path, ba
 	run_musescore_export(musescore_exe, moved_midi, musicxml_path)
 	run_musescore_export(musescore_exe, moved_midi, wav_path)
 	create_alignment_csv(str(csv_path), str(musicxml_path))
+	populate_alignment_csv(str(csv_path), str(moved_midi))
 
 	return moved_midi, musicxml_path, wav_path, csv_path
 
