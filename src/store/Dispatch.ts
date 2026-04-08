@@ -1,4 +1,4 @@
-import { NoteColor } from "../utils/musicXmlUtils";
+import { NoteColor } from "../utils/osmdConfig";
 
 const reducer_function = (state: any, action: any) => {
   // console.log("Dispatch received.");

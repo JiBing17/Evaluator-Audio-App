@@ -1,10 +1,10 @@
 import { PitchDetector } from "pitchy";
 import { CSVRow, loadCsvInfo } from "../utils/csvParsingUtils";
 import { prepareAudio } from "../utils/audioUtils";
-import { NoteColor } from "../utils/musicXmlUtils";
+import { NoteColor, OSMD_CONFIG } from "../utils/osmdConfig";
 import { NativeModules, Platform } from "react-native";
 
-export const MISTAKE_THRESHOLD = 0.5;
+export const MISTAKE_THRESHOLD = 0.25;
 export const SEMITONE_FILTER_THRESHOLD = 6;
 export const OCTAVE_FILTER_THRESHOLD = 2;
 export const MISTAKE_THRESHOLD_MIN = 0;
@@ -61,12 +61,12 @@ export function intonationToNoteColor(
   mistakeThreshold: number = MISTAKE_THRESHOLD
 ): NoteColor {
   let color: string;
-  if (Math.abs(intonation) < mistakeThreshold) {
-    color = COLOR_NEUTRAL;
+  if (Math.abs(intonation) < MISTAKE_THRESHOLD) {
+    color = OSMD_CONFIG.noteColorNeutral;
   } else if (intonation > 0) {
-    color = COLOR_SHARP;
+    color = OSMD_CONFIG.noteColorSharp;
   } else {
-    color = COLOR_FLAT;
+    color = OSMD_CONFIG.noteColorFlat;
   }
 
   return { index: noteIdx, color: color };

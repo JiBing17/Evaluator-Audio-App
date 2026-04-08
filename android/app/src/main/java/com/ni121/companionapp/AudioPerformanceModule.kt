@@ -409,6 +409,20 @@ class AudioPerformanceModule(reactContext: ReactApplicationContext) : ReactConte
         }
     }
 
+    @ReactMethod
+    fun fastResetDTW(promise: Promise) {
+        try {
+            if (dtw.isInitialized) {
+                dtw.fastReset()
+                promise.resolve(true)
+            } else {
+                promise.reject("NOT_INITIALIZED", "DTW is not initialized")
+            }
+        } catch (e: Exception) {
+            promise.reject("FAST_RESET_ERROR", e)
+        }
+    }
+
     private var lastEventTime: Long = 0
     
     // Silence detection threshold (RMS energy) - higher value requires louder sound
