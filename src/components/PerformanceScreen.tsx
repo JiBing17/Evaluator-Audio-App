@@ -324,8 +324,7 @@ export default function PerformanceScreen({
     setPerformanceSaved(false);
   };
 
-  const runPerformance = async (options?: { isRestart?: boolean }) => {
-    const isRestart = options?.isRestart ?? false;
+  const runPerformance = async () => {
     const hasPermission = await requestMicrophonePermission();
     if (!hasPermission) {
       Alert.alert(
@@ -430,7 +429,7 @@ export default function PerformanceScreen({
 
     resetPerformanceState();
 
-    await runPerformance({ isRestart: true });
+    await runPerformance();
   };
 
   const handlePitchUpdate = async (freq: number) => {
