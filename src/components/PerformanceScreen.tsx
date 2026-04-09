@@ -203,7 +203,11 @@ export default function PerformanceScreen({
 
   const resetPerformanceState = () => {
     expNoteIdxRef.current = 0;
-    noteColorsRef.current = [];
+    const resetColors = Array.from({ length: 5000 }, (_, i) => ({
+      index: i,
+      color: "#000000",
+    }));
+    noteColorsRef.current = resetColors;
     pitchBufferRef.current = []; // Reset buffer
     noteMistakesRef.current = [];
 
@@ -211,7 +215,7 @@ export default function PerformanceScreen({
     intonationDataRef.current = [];
     durationRatioDataRef.current = [];
 
-    dispatch({ type: "SET_NOTE_COLORS", payload: [] });
+    dispatch({ type: "SET_NOTE_COLORS", payload: resetColors });
     dispatch({ type: "SET_ESTIMATED_BEAT", payload: 0 });
     setPerformanceComplete(false);
     setPerformanceSaved(false);
@@ -374,8 +378,13 @@ export default function PerformanceScreen({
         const nextNote = noteTable[expNoteIndex + 1];
 
         let expectedDuration = (nextNote.refTime - currentNote.refTime) * 1000;
-        // TEST: uncomment to follow user tempo
-        // expectedDuration *= median(durationRatioDataRef.current.slice(-5));
+        // // TEST: uncomment to follow user tempo
+        // console.log(durationRatioDataRef.current);
+        // const durationScale = listMedian(durationRatioDataRef.current.slice(-5));
+        // console.log("Expected duration:", expectedDuration, "*", durationScale, expectedDuration * durationScale);
+        // if (durationScale < 10 && durationScale > 0) {
+        //   expectedDuration = expectedDuration * durationScale;
+        // }
 
         // If next note is same pitch class (e.g. C4 and C5, or same note)
         if (currentNote.midi % 12 === nextNote.midi % 12) {
