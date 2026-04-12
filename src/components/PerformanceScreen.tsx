@@ -924,12 +924,12 @@ const styles = StyleSheet.create({
     backgroundColor: "#2C3E50",
     borderRadius: 8,
     alignItems: "center",
+    marginBottom: 8,
   },
   buttonRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginTop: 8,
   },
   halfButton: {
     flex: 1,
