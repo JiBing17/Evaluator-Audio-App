@@ -19,12 +19,24 @@ class AudioPerformanceModule(reactContext: ReactApplicationContext) : ReactConte
     
     companion object {
         private const val TAG = "AudioPerformanceModule"
+        private const val DEFAULT_PROCESSING_BUFFER_SIZE = 4096
+        private const val DEFAULT_RMS_GATE = 0.01f
+        private const val DEFAULT_YIN_PROB_GATE = 0.4f
+        private const val MIN_PROCESSING_BUFFER_SIZE = 512
+        private const val MAX_PROCESSING_BUFFER_SIZE = 8192
+        private const val PROCESSING_BUFFER_SIZE_STEP = 256
+        private const val MIN_RMS_GATE = 0.0
+        private const val MAX_RMS_GATE = 0.1
+        private const val RMS_GATE_STEP = 0.001
+        private const val MIN_YIN_PROB_GATE = 0.0
+        private const val MAX_YIN_PROB_GATE = 1.0
+        private const val YIN_PROB_GATE_STEP = 0.01
     }
     
     private val SAMPLE_RATE = 44100
-    private val PROCESSING_BUFFER_SIZE = 4096
-    private val RMS_GATE = 0.005
-    private val YIN_PROB_GATE = 0.6 
+    private var processingBufferSize = DEFAULT_PROCESSING_BUFFER_SIZE
+    private var rmsGate = DEFAULT_RMS_GATE
+    private var yinProbGate = DEFAULT_YIN_PROB_GATE
 
     private val MIN_BUFFER_SIZE = AudioRecord.getMinBufferSize(
         SAMPLE_RATE,
@@ -55,6 +67,49 @@ class AudioPerformanceModule(reactContext: ReactApplicationContext) : ReactConte
     @ReactMethod
     fun removeListeners(count: Int) {
         // Required for NativeEventEmitter
+    }
+
+    /**
+     * Set audio processing parameters for both pitch detection and DTW.
+     * @param bufferSize Size of audio buffer for processing
+     * @param rmsGateThreshold threshold for silence detection (higher = more aggressive)
+     * @param yinProbGateThreshold threshold for accepting pitch detections (0 to 1)
+     */
+    @ReactMethod
+    fun setProcessingConfig(
+        bufferSize: Int, 
+        rmsGateThreshold: Double, 
+        yinProbGateThreshold: Double, 
+        promise: Promise
+    ) {
+        try {
+            processingBufferSize = bufferSize
+            rmsGate = rmsGateThreshold.toFloat()
+            yinProbGate = yinProbGateThreshold.toFloat()
+            promise.resolve(true)
+        } catch (e: Exception) {
+            promise.reject("CONFIG_ERROR", e)
+        }
+    }
+
+    @ReactMethod
+    fun getProcessingConfigBounds(promise: Promise) {
+        try {
+            val bounds = Arguments.createMap().apply {
+                putInt("bufferMin", MIN_PROCESSING_BUFFER_SIZE)
+                putInt("bufferMax", MAX_PROCESSING_BUFFER_SIZE)
+                putInt("bufferStep", PROCESSING_BUFFER_SIZE_STEP)
+                putDouble("rmsMin", MIN_RMS_GATE)
+                putDouble("rmsMax", MAX_RMS_GATE)
+                putDouble("rmsStep", RMS_GATE_STEP)
+                putDouble("yinMin", MIN_YIN_PROB_GATE)
+                putDouble("yinMax", MAX_YIN_PROB_GATE)
+                putDouble("yinStep", YIN_PROB_GATE_STEP)
+            }
+            promise.resolve(bounds)
+        } catch (e: Exception) {
+            promise.reject("CONFIG_BOUNDS_ERROR", e)
+        }
     }
 
     /**
@@ -93,18 +148,18 @@ class AudioPerformanceModule(reactContext: ReactApplicationContext) : ReactConte
                 Log.d(TAG, "Parsed ${audioSamples.size} audio samples")
                 
                 // Initialize CENS utils
-                val cens = CENSUtils(SAMPLE_RATE, PROCESSING_BUFFER_SIZE)
+                val cens = CENSUtils(SAMPLE_RATE, processingBufferSize)
                 censUtils = cens
                 
                 // Compute number of frames
                 val numSamples = audioSamples.size
-                val numFrames = numSamples / PROCESSING_BUFFER_SIZE
+                val numFrames = numSamples / processingBufferSize
                 Log.d(TAG, "Computing $numFrames CENS frames from audio")
                 
                 // Compute CENS features for each frame
                 val features = Array(numFrames) { frameIdx ->
-                    val frameStart = frameIdx * PROCESSING_BUFFER_SIZE
-                    val frame = FloatArray(PROCESSING_BUFFER_SIZE) { i ->
+                    val frameStart = frameIdx * processingBufferSize
+                    val frame = FloatArray(processingBufferSize) { i ->
                         if (frameStart + i < audioSamples.size) audioSamples[frameStart + i] else 0f
                     }
                     cens.computeCENS(frame)
@@ -240,18 +295,18 @@ class AudioPerformanceModule(reactContext: ReactApplicationContext) : ReactConte
             Log.d(TAG, "initializeDTWFromAudio: received ${audioSamples.size()} samples")
             
             // Initialize CENS utils
-            val cens = CENSUtils(SAMPLE_RATE, PROCESSING_BUFFER_SIZE)
+            val cens = CENSUtils(SAMPLE_RATE, processingBufferSize)
             censUtils = cens
             
             // Compute number of frames
             val numSamples = audioSamples.size()
-            val numFrames = numSamples / PROCESSING_BUFFER_SIZE
+            val numFrames = numSamples / processingBufferSize
             Log.d(TAG, "Computing $numFrames CENS frames from audio")
             
             // Compute CENS features for each frame
             val features = Array(numFrames) { frameIdx ->
-                val frameStart = frameIdx * PROCESSING_BUFFER_SIZE
-                val frame = FloatArray(PROCESSING_BUFFER_SIZE) { i ->
+                val frameStart = frameIdx * processingBufferSize
+                val frame = FloatArray(processingBufferSize) { i ->
                     audioSamples.getDouble(frameStart + i).toFloat()
                 }
                 cens.computeCENS(frame)
@@ -290,7 +345,7 @@ class AudioPerformanceModule(reactContext: ReactApplicationContext) : ReactConte
             dtw.initialize(features, bigC, maxRun, diagW)
             
             // Initialize CENS utils
-            censUtils = CENSUtils(SAMPLE_RATE, PROCESSING_BUFFER_SIZE)
+            censUtils = CENSUtils(SAMPLE_RATE, processingBufferSize)
             
             promise.resolve(true)
         } catch (e: Exception) {
@@ -312,7 +367,7 @@ class AudioPerformanceModule(reactContext: ReactApplicationContext) : ReactConte
                 SAMPLE_RATE,
                 AudioFormat.CHANNEL_IN_MONO,
                 AudioFormat.ENCODING_PCM_16BIT,
-                Math.max(MIN_BUFFER_SIZE, PROCESSING_BUFFER_SIZE * 2)
+                Math.max(MIN_BUFFER_SIZE, processingBufferSize * 2)
             )
 
             if (audioRecord?.state != AudioRecord.STATE_INITIALIZED) {
@@ -374,14 +429,14 @@ class AudioPerformanceModule(reactContext: ReactApplicationContext) : ReactConte
     private val SILENCE_THRESHOLD = 1500f  // Filter soft background noise
 
     private fun processAudioStream() {
-        val buffer = ShortArray(PROCESSING_BUFFER_SIZE)
-        val floatBuffer = FloatArray(PROCESSING_BUFFER_SIZE)
-        val fastYin = FastYin(SAMPLE_RATE.toFloat(), PROCESSING_BUFFER_SIZE)
+        val buffer = ShortArray(processingBufferSize)
+        val floatBuffer = FloatArray(processingBufferSize)
+        val fastYin = FastYin(SAMPLE_RATE.toFloat(), processingBufferSize)
 
         Log.d(TAG, "Processing thread started, DTW initialized: ${dtw.isInitialized}")
 
         while (isRecording.get()) {
-            val readResult = audioRecord?.read(buffer, 0, PROCESSING_BUFFER_SIZE) ?: 0
+            val readResult = audioRecord?.read(buffer, 0, processingBufferSize) ?: 0
 
             if (readResult > 0) {
                 // Convert to float and compute RMS energy
@@ -419,7 +474,7 @@ class AudioPerformanceModule(reactContext: ReactApplicationContext) : ReactConte
                 if (currentTime - lastEventTime > 50) {
                     sendFrameEvent(refPosition, pitch.toDouble(), probability.toDouble())
                     
-                    if (pitch > 0 && probability > YIN_PROB_GATE) {
+                    if (pitch > 0 && probability > yinProbGate) {
                         sendEvent("onPitchDetected", pitch.toDouble())
                     }
                     

@@ -7,6 +7,15 @@ import { NativeModules, Platform } from "react-native";
 export const MISTAKE_THRESHOLD = 0.25;
 export const SEMITONE_FILTER_THRESHOLD = 6;
 export const OCTAVE_FILTER_THRESHOLD = 2;
+export const MISTAKE_THRESHOLD_MIN = 0;
+export const MISTAKE_THRESHOLD_MAX = 2;
+export const MISTAKE_THRESHOLD_STEP = 0.01;
+export const SEMITONE_FILTER_THRESHOLD_MIN = 0;
+export const SEMITONE_FILTER_THRESHOLD_MAX = 12;
+export const SEMITONE_FILTER_THRESHOLD_STEP = 0.1;
+export const OCTAVE_FILTER_THRESHOLD_MIN = 0;
+export const OCTAVE_FILTER_THRESHOLD_MAX = 5;
+export const OCTAVE_FILTER_THRESHOLD_STEP = 1;
 
 const AGGREGATE_DIVISOR = 1.1;
 const AGGREGATE_DEFAULT_SIZE = 10;
@@ -20,25 +29,34 @@ if (Platform.OS === "android") {
   }
 }
 
-export function calculateSingleNoteIntonation(detectedMidi: number, scoreMidi: number): number {
+export function calculateSingleNoteIntonation(
+  detectedMidi: number,
+  scoreMidi: number,
+  semitoneThreshold: number = SEMITONE_FILTER_THRESHOLD,
+  octaveThreshold: number = OCTAVE_FILTER_THRESHOLD
+): number {
   if (Number.isNaN(detectedMidi)) return NaN;
   
     const diff = detectedMidi - scoreMidi;
     const octavesCorrected = Math.round(diff / 12);
     const intonation = diff + (octavesCorrected * -12);
    
-    if (Math.abs(octavesCorrected) > OCTAVE_FILTER_THRESHOLD) {
+    if (Math.abs(octavesCorrected) > octaveThreshold) {
       // console.log("[DEBUG] Octave filter", octavesCorrected);
       return NaN;
     };
-    if (Math.abs(intonation) > SEMITONE_FILTER_THRESHOLD) {
+    if (Math.abs(intonation) > semitoneThreshold) {
       // console.log("[DEBUG] Semitone filter", intonation);
       return NaN;
     }
     return intonation;
 }
 
-export function intonationToNoteColor(intonation: number, noteIdx: number): NoteColor {
+export function intonationToNoteColor(
+  intonation: number,
+  noteIdx: number,
+  mistakeThreshold: number = MISTAKE_THRESHOLD
+): NoteColor {
   let color: string;
   if (Math.abs(intonation) < MISTAKE_THRESHOLD) {
     color = OSMD_CONFIG.noteColorNeutral;

@@ -1,11 +1,12 @@
 import React, { useState, useRef, useEffect } from "react";
+import Slider from "@react-native-community/slider";
 import {
   View,
   Text,
   TouchableOpacity,
   StyleSheet,
-  TextInput,
   Switch,
+  Modal,
 } from "react-native";
 
 import {
@@ -22,7 +23,17 @@ import {
   listMedian,
   hzToMidi,
   MISTAKE_THRESHOLD,
+  MISTAKE_THRESHOLD_MIN,
+  MISTAKE_THRESHOLD_MAX,
+  MISTAKE_THRESHOLD_STEP,
   SEMITONE_FILTER_THRESHOLD,
+  SEMITONE_FILTER_THRESHOLD_MIN,
+  SEMITONE_FILTER_THRESHOLD_MAX,
+  SEMITONE_FILTER_THRESHOLD_STEP,
+  OCTAVE_FILTER_THRESHOLD,
+  OCTAVE_FILTER_THRESHOLD_MIN,
+  OCTAVE_FILTER_THRESHOLD_MAX,
+  OCTAVE_FILTER_THRESHOLD_STEP,
 } from "../audio/Intonation";
 
 import { CSVRow, loadCsvInfo } from "../utils/csvParsingUtils";
@@ -30,6 +41,7 @@ import {
   getScoreCSVData,
   getScoreRefAudio,
 } from "../score_name_to_data_map/unifiedScoreMap";
+import scoreToMidi from "../score_name_to_data_map/scoreToMidi";
 
 import { NoteColor } from "../utils/osmdConfig";
 
@@ -38,7 +50,7 @@ import { getCurrentUser, savePerformanceData } from "../utils/accountUtils";
 
 interface PerformanceScreenProps {
   score: string; // Selected score name
-  dispatch: (action: { type: string; payload?: any }) => void; // Dispatch function used to update global state
+  dispatch: (action: any) => void; // Dispatch function used to update global state
   bpm?: number; // Optional BPM number
   state: any;
 }
@@ -47,6 +59,10 @@ interface PerformanceScreenProps {
 const ADVANCE_THRESHOLD = MISTAKE_THRESHOLD;
 const MIN_ADVANCE_TIME = 10; // ms
 const SAME_PITCH_WAIT_FRACTION = 0.5;
+const PITCH_WARNING_WINDOW = 12;
+const PITCH_WARNING_MIN = 8;
+const PITCH_WARNING_COOLDOWN_MS = 3000;
+const PITCH_WARNING_DURATION_MS = 2000;
 
 const SAMPLE_RATE = 44100;
 const FRAME_SIZE = 4096;
@@ -81,6 +97,9 @@ export default function PerformanceScreen({
 
   const pitchBufferRef = useRef<number[]>([]); // Buffer for median filtering
   const noteMistakesRef = useRef<number[]>([]); // Buffer for mistake categorization
+  const pitchWarningBufferRef = useRef<number[]>([]);
+  const pitchWarningTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastPitchWarningRef = useRef<number>(0);
 
   const lastAdvanceTimeRef = useRef<number>(0);
   const lastInitializedScoreRef = useRef<string | null>(null);
@@ -94,6 +113,32 @@ export default function PerformanceScreen({
   const [isProcessing, setIsProcessing] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
 
+  // Audio parameter controls
+  const [mistakeThreshold, setMistakeThreshold] = useState(MISTAKE_THRESHOLD);
+  const [semitoneFilterThreshold, setSemitoneFilterThreshold] = useState(
+    SEMITONE_FILTER_THRESHOLD
+  );
+  const [octaveFilterThreshold, setOctaveFilterThreshold] = useState(
+    OCTAVE_FILTER_THRESHOLD
+  );
+  const [rmsGate, setRmsGate] = useState(0.01);
+  const [yinProbGate, setYinProbGate] = useState(0.4);
+  const [processingBufferSize, setProcessingBufferSize] = useState(4096);
+  const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
+  const [showPitchWarning, setShowPitchWarning] = useState(false);
+  const [pitchWarningText, setPitchWarningText] = useState("");
+  const [nativeBounds, setNativeBounds] = useState({
+    bufferMin: 512,
+    bufferMax: 8192,
+    bufferStep: 256,
+    rmsMin: 0,
+    rmsMax: 0.1,
+    rmsStep: 0.001,
+    yinMin: 0,
+    yinMax: 1,
+    yinStep: 0.01,
+  });
+
    const [useDTWMode, setUseDTWMode] = useState(true); // true = DTW, false = Note-by-Note
   const useDTWModeRef = useRef(true); // Ref to access current mode in event handler
   const updateScheduled = useRef<boolean>(false);
@@ -104,6 +149,24 @@ export default function PerformanceScreen({
   useEffect(() => {
     useDTWModeRef.current = useDTWMode;
   }, [useDTWMode]);
+
+  useEffect(() => {
+    const loadNativeBounds = async () => {
+      if (!AudioPerformanceModule?.getProcessingConfigBounds) return;
+
+      try {
+        const bounds = await AudioPerformanceModule.getProcessingConfigBounds();
+        setNativeBounds((prev) => ({
+          ...prev,
+          ...bounds,
+        }));
+      } catch (e) {
+        console.warn("Failed to load native processing bounds; using defaults", e);
+      }
+    };
+
+    loadNativeBounds();
+  }, []);
 
   const scheduleBeatUpdate = (beat: number) => {
     latestBeat.current = beat;
@@ -116,6 +179,46 @@ export default function PerformanceScreen({
         }
         updateScheduled.current = false;
       });
+    }
+  };
+
+  const showPitchWarningPopup = (message: string) => {
+    const now = Date.now();
+    if (now - lastPitchWarningRef.current < PITCH_WARNING_COOLDOWN_MS) return;
+
+    lastPitchWarningRef.current = now;
+    setPitchWarningText(message);
+    setShowPitchWarning(true);
+
+    if (pitchWarningTimeoutRef.current) {
+      clearTimeout(pitchWarningTimeoutRef.current);
+    }
+
+    pitchWarningTimeoutRef.current = setTimeout(() => {
+      setShowPitchWarning(false);
+    }, PITCH_WARNING_DURATION_MS);
+  };
+
+  const recordPitchWarningSample = (intonation: number) => {
+    if (Math.abs(intonation) <= ADVANCE_THRESHOLD) return;
+
+    const buffer = pitchWarningBufferRef.current;
+    buffer.push(intonation);
+    if (buffer.length > PITCH_WARNING_WINDOW) buffer.shift();
+
+    if (buffer.length < PITCH_WARNING_WINDOW) return;
+
+    let highCount = 0;
+    let lowCount = 0;
+    for (const sample of buffer) {
+      if (sample > ADVANCE_THRESHOLD) highCount++;
+      if (sample < -ADVANCE_THRESHOLD) lowCount++;
+    }
+
+    if (highCount >= PITCH_WARNING_MIN) {
+      showPitchWarningPopup("Lower your pitch");
+    } else if (lowCount >= PITCH_WARNING_MIN) {
+      showPitchWarningPopup("Raise your pitch");
     }
   };
 
@@ -132,6 +235,10 @@ export default function PerformanceScreen({
       subscription.remove();
       AudioPerformanceModule.stopProcessing();
       setIsProcessing(false);
+      if (pitchWarningTimeoutRef.current) {
+        clearTimeout(pitchWarningTimeoutRef.current);
+        pitchWarningTimeoutRef.current = null;
+      }
     };
   }, [dispatch]);
 
@@ -274,6 +381,9 @@ export default function PerformanceScreen({
       console.log("Note-by-Note mode - skipping DTW initialization");
     }
 
+    // Set audio processing parameters on native module
+    await applyNativeProcessingConfig();
+
     // Start Native Audio Engine
     if (AudioPerformanceModule?.startProcessing) {
       await AudioPerformanceModule.startProcessing();
@@ -281,6 +391,19 @@ export default function PerformanceScreen({
     }
   };
 
+  const applyNativeProcessingConfig  = async () => {
+    if (!AudioPerformanceModule?.setProcessingConfig) return
+
+    try {
+      await AudioPerformanceModule.setProcessingConfig(
+        processingBufferSize,
+        rmsGate,
+        yinProbGate
+      )
+    } catch (e) {
+      console.error("Failed to apply processing config to native module:", e);
+    }
+  }
   const togglePause = async () => {
     if (
       !AudioPerformanceModule?.stopProcessing ||
@@ -310,8 +433,7 @@ export default function PerformanceScreen({
 
     resetPerformanceState();
 
-    await AudioPerformanceModule.startProcessing();
-    setIsProcessing(true);
+    await runPerformance();
   };
 
   const handlePitchUpdate = async (freq: number) => {
@@ -332,6 +454,8 @@ export default function PerformanceScreen({
     const sampleIntonation = calculateSingleNoteIntonation(
       detectedMidi,
       targetNote.midi,
+      semitoneFilterThreshold,
+      octaveFilterThreshold
     );
     // Silence or filtered note
     if (Number.isNaN(sampleIntonation)) return;
@@ -346,7 +470,11 @@ export default function PerformanceScreen({
 
     // update note color of latest attempt
     // console.log("Intonation", intonation, intonationToNoteColor(intonation, expNoteIndex), noteColorsRef.current);
-    const newNoteColor = intonationToNoteColor(intonation, expNoteIndex);
+    const newNoteColor = intonationToNoteColor(
+      intonation,
+      expNoteIndex,
+      mistakeThreshold
+    );
 
     // Check if color actually changed to avoid unnecessary re-renders/bridge traffic
     if (noteColorsRef.current[expNoteIndex]?.color !== newNoteColor.color) {
@@ -361,6 +489,7 @@ export default function PerformanceScreen({
     if (Math.abs(intonation) > ADVANCE_THRESHOLD) {
       // Add to mistake aggregate
       noteMistakesRef.current.push(intonation);
+      recordPitchWarningSample(intonation);
     } else {
       // Advance note
       const now = Date.now();
@@ -442,7 +571,12 @@ export default function PerformanceScreen({
     // 1. Buffer pitch for current note
     if (freq > 0 && probability > 0.4) {
       const midi = hzToMidi(freq);
-      const sampleIntonation = calculateSingleNoteIntonation(midi, targetNote.midi);
+      const sampleIntonation = calculateSingleNoteIntonation(
+        midi,
+        targetNote.midi,
+        semitoneFilterThreshold,
+        octaveFilterThreshold
+      );
 
       if (!Number.isNaN(sampleIntonation)) {
         // Median Buffering (same as Note-by-Note)
@@ -453,6 +587,7 @@ export default function PerformanceScreen({
         const intonation = listMedian(buffer);
         // Accumulate the robust intonation for the entire note
         noteMistakesRef.current.push(intonation);
+        recordPitchWarningSample(intonation);
       }
     }
 
@@ -467,7 +602,11 @@ export default function PerformanceScreen({
           ? listMedian(noteMistakesRef.current)
           : 0;
 
-      const noteColor = intonationToNoteColor(medianIntonation, currentIndex);
+      const noteColor = intonationToNoteColor(
+        medianIntonation,
+        currentIndex,
+        mistakeThreshold
+      );
 
       if (noteColorsRef.current[currentIndex]?.color !== noteColor.color) {
         noteColorsRef.current[currentIndex] = noteColor;
@@ -537,7 +676,151 @@ export default function PerformanceScreen({
   };
 
   return (
-    <View>
+    <View style={styles.container}>
+      <Modal
+        transparent
+        visible={showPitchWarning}
+        animationType="fade"
+        statusBarTranslucent
+      >
+        <View style={styles.pitchWarningContainer} pointerEvents="none">
+          <View style={styles.pitchWarningBox}>
+            <Text style={styles.pitchWarningText}>{pitchWarningText}</Text>
+          </View>
+        </View>
+      </Modal>
+      {/* Advanced Audio Settings */}
+      <TouchableOpacity
+        style={styles.settingsHeader}
+        onPress={() => setShowAdvancedSettings(!showAdvancedSettings)}
+      >
+        <Text style={styles.settingsTitle}>
+          ⚙️ Audio Settings {showAdvancedSettings ? "▼" : "▶"}
+        </Text>
+      </TouchableOpacity>
+
+      {showAdvancedSettings && (
+        <View style={styles.settingsContainer}>
+          {/* Mistake Threshold */}
+          <View style={styles.sliderRow}>
+            <View style={styles.sliderHeader}>
+              <Text style={styles.sliderLabel}>Mistake Threshold</Text>
+              <Text style={styles.sliderValue}>{mistakeThreshold.toFixed(2)}</Text>
+            </View>
+            <Slider
+              style={styles.slider}
+              minimumValue={MISTAKE_THRESHOLD_MIN}
+              maximumValue={MISTAKE_THRESHOLD_MAX}
+              step={MISTAKE_THRESHOLD_STEP}
+              value={mistakeThreshold}
+              onValueChange={setMistakeThreshold}
+              minimumTrackTintColor="#2C3E50"
+              maximumTrackTintColor="#BDC3C7"
+              thumbTintColor="#2C3E50"
+            />
+          </View>
+
+          {/* Semitone Filter Threshold */}
+          <View style={styles.sliderRow}>
+            <View style={styles.sliderHeader}>
+              <Text style={styles.sliderLabel}>Semitone Filter</Text>
+              <Text style={styles.sliderValue}>
+                {semitoneFilterThreshold.toFixed(1)} st
+              </Text>
+            </View>
+            <Slider
+              style={styles.slider}
+              minimumValue={SEMITONE_FILTER_THRESHOLD_MIN}
+              maximumValue={SEMITONE_FILTER_THRESHOLD_MAX}
+              step={SEMITONE_FILTER_THRESHOLD_STEP}
+              value={semitoneFilterThreshold}
+              onValueChange={setSemitoneFilterThreshold}
+              minimumTrackTintColor="#2C3E50"
+              maximumTrackTintColor="#BDC3C7"
+              thumbTintColor="#2C3E50"
+            />
+          </View>
+
+          {/* Octave Filter Threshold */}
+          <View style={styles.sliderRow}>
+            <View style={styles.sliderHeader}>
+              <Text style={styles.sliderLabel}>Octave Filter</Text>
+              <Text style={styles.sliderValue}>
+                {octaveFilterThreshold.toFixed(0)} octaves
+              </Text>
+            </View>
+            <Slider
+              style={styles.slider}
+              minimumValue={OCTAVE_FILTER_THRESHOLD_MIN}
+              maximumValue={OCTAVE_FILTER_THRESHOLD_MAX}
+              step={OCTAVE_FILTER_THRESHOLD_STEP}
+              value={octaveFilterThreshold}
+              onValueChange={setOctaveFilterThreshold}
+              minimumTrackTintColor="#2C3E50"
+              maximumTrackTintColor="#BDC3C7"
+              thumbTintColor="#2C3E50"
+            />
+          </View>
+
+          {/* RMS Gate (Native) */}
+          <View style={styles.sliderRow}>
+            <View style={styles.sliderHeader}>
+              <Text style={styles.sliderLabel}>RMS Gate</Text>
+              <Text style={styles.sliderValue}>{rmsGate.toFixed(3)}</Text>
+            </View>
+            <Slider
+              style={styles.slider}
+              minimumValue={nativeBounds.rmsMin}
+              maximumValue={nativeBounds.rmsMax}
+              step={nativeBounds.rmsStep}
+              value={rmsGate}
+              onValueChange={setRmsGate}
+              minimumTrackTintColor="#2C3E50"
+              maximumTrackTintColor="#BDC3C7"
+              thumbTintColor="#2C3E50"
+            />
+          </View>
+
+          {/* YIN Prob Gate (Native) */}
+          <View style={styles.sliderRow}>
+            <View style={styles.sliderHeader}>
+              <Text style={styles.sliderLabel}>YIN Prob Gate</Text>
+              <Text style={styles.sliderValue}>{yinProbGate.toFixed(2)}</Text>
+            </View>
+            <Slider
+              style={styles.slider}
+              minimumValue={nativeBounds.yinMin}
+              maximumValue={nativeBounds.yinMax}
+              step={nativeBounds.yinStep}
+              value={yinProbGate}
+              onValueChange={setYinProbGate}
+              minimumTrackTintColor="#2C3E50"
+              maximumTrackTintColor="#BDC3C7"
+              thumbTintColor="#2C3E50"
+            />
+          </View>
+
+          {/* Processing Buffer Size (Native) */}
+          <View style={styles.sliderRow}>
+            <View style={styles.sliderHeader}>
+              <Text style={styles.sliderLabel}>Buffer Size</Text>
+              <Text style={styles.sliderValue}>{processingBufferSize} samples</Text>
+            </View>
+            <Slider
+              style={styles.slider}
+              minimumValue={nativeBounds.bufferMin}
+              maximumValue={nativeBounds.bufferMax}
+              step={nativeBounds.bufferStep}
+              value={processingBufferSize}
+              onValueChange={setProcessingBufferSize}
+              minimumTrackTintColor="#2C3E50"
+              maximumTrackTintColor="#BDC3C7"
+              thumbTintColor="#2C3E50"
+            />
+          </View>
+        </View>
+      )}
+
       {/* Show tempo of selected score to be played */}
       {bpm ? (
         <Text style={styles.tempoText}>Reference Tempo: {bpm} BPM</Text>
@@ -567,7 +850,9 @@ export default function PerformanceScreen({
           styles.button,
           (state.score === "" || state.playing) && styles.disabledButton,
         ]}
-        onPress={runPerformance}
+        onPress={() => {
+          runPerformance();
+        }}
         disabled={state.score === "" || state.playing} // Disabled when no score is selected or already playing performance
       >
         <Text style={styles.buttonText}>
@@ -639,17 +924,21 @@ export default function PerformanceScreen({
 
 // Define styles for the components using StyleSheet
 const styles = StyleSheet.create({
+  container: {
+    position: "relative",
+    flex: 1,
+  },
   button: {
     padding: 12,
     backgroundColor: "#2C3E50",
     borderRadius: 8,
     alignItems: "center",
+    marginBottom: 8,
   },
   buttonRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginTop: 8,
   },
   halfButton: {
     flex: 1,
@@ -665,7 +954,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#34495E",
   },
   saveButton: {
-    marginTop: 8,
+    marginLeft: 8,
     backgroundColor: "#27AE60",
   },
   disabledButton: {
@@ -739,5 +1028,69 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     // optional hard cap to be safer:
     maxWidth: 220,
+  },
+  settingsHeader: {
+    padding: 12,
+    backgroundColor: "#34495E",
+    borderRadius: 8,
+    marginBottom: 8,
+  },
+  settingsTitle: {
+    color: "#FFF",
+    fontSize: 14,
+    fontWeight: "bold",
+  },
+  settingsContainer: {
+    backgroundColor: "#ECF0F1",
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 12,
+  },
+  sliderRow: {
+    marginVertical: 10,
+  },
+  sliderHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 4,
+  },
+  slider: {
+    width: "100%",
+    height: 40,
+  },
+  sliderValue: {
+    fontSize: 12,
+    color: "#34495E",
+    fontVariant: ["tabular-nums"],
+  },
+  sliderLabel: {
+    fontSize: 12,
+    color: "#2C3E50",
+    fontWeight: "500",
+    flex: 1,
+  },
+  pitchWarningContainer: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "flex-start",
+    paddingTop: 12,
+    zIndex: 9999,
+    shadowColor: "#000",
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 20,
+  },
+  pitchWarningBox: {
+    backgroundColor: "rgba(0, 0, 0, 0.7)",
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+  },
+  pitchWarningText: {
+    color: "#FFF",
+    fontSize: 12,
+    fontWeight: "600",
   },
 });

@@ -7,6 +7,7 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
+    "generate-assets": "node scripts/generateAssetMappings.js",
     "format": "npx prettier --write .",
     "lint": "eslint . --fix && echo \"errors reported are the ones can't be fixed by eslint automatically\"",
     "test": "jest --watchAll",
@@ -15,6 +16,7 @@
   "dependencies": {
     "@expo/metro-runtime": "~6.1.2",
     "@react-native-async-storage/async-storage": "^2.2.0",
+    "@react-native-community/slider": "^5.1.2",
     "@react-native-picker/picker": "2.11.1",
     "@tonejs/midi": "^2.0.28",
     "@types/jest": "^30.0.0",
